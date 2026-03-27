@@ -22,7 +22,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--llm-provider", default="fpt", help="LLM provider")
     parser.add_argument(
-        "--llm-model", default="Llama-3.3-70B-Instruct", help="LLM model name"
+        "--llm-model", default="Qwen3-32B", help="LLM model name"
     )
     parser.add_argument(
         "--top-k", type=int, default=5, help="Top-K documents to retrieve"
@@ -42,6 +42,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--list-models", action="store_true", help="List available embedding models"
+    )
+    # Evaluation options
+    parser.add_argument(
+        "--semantic", action="store_true",
+        help="Include BERTScore and Semantic Similarity metrics",
+    )
+    parser.add_argument(
+        "--eval-faithfulness", action="store_true",
+        help="Evaluate faithfulness using LLM-as-Judge (doubles API cost)",
+    )
+    parser.add_argument(
+        "--judge-model", default="",
+        help="Model name for LLM-as-Judge (required with --eval-faithfulness)",
     )
     return parser.parse_args(argv)
 
@@ -75,6 +88,9 @@ def main(argv: list[str] | None = None) -> None:
             output_dir=args.output_dir,
             chroma_dir=args.chroma_dir,
             force_reindex=args.force,
+            include_semantic=args.semantic,
+            eval_faithfulness=args.eval_faithfulness,
+            judge_model=args.judge_model,
         )
         run_pipeline(config)
 

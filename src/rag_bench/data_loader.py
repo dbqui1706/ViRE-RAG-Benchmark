@@ -75,6 +75,7 @@ def load_and_sample(
                 "qid": str(row["qid"]),
                 "question": str(row["question"]),
                 "answer": str(row["answer"]),
+                "context": str(row["context"]),
             }
         )
 

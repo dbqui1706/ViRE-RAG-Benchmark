@@ -10,7 +10,7 @@ def save_results(results: dict, output_dir: str | Path) -> None:
     """Save experiment results as JSON and Markdown.
 
     Args:
-        results: Dict with 'config', 'metrics', 'latency', and optionally 'per_query'.
+        results: Dict with 'config', metric sections, 'latency', and optionally 'per_query'.
         output_dir: Directory to save files to.
     """
     output_dir = Path(output_dir)
@@ -27,7 +27,9 @@ def save_results(results: dict, output_dir: str | Path) -> None:
 
     # Markdown report
     cfg = results.get("config", {})
-    metrics = results.get("metrics", {})
+    gen_metrics = results.get("generation_metrics", results.get("metrics", {}))
+    ret_metrics = results.get("retrieval_metrics", {})
+    faith_metrics = results.get("faithfulness_metrics", {})
     latency = results.get("latency", {})
 
     md = [
@@ -38,23 +40,52 @@ def save_results(results: dict, output_dir: str | Path) -> None:
         f"**LLM:** {cfg.get('llm_model', 'N/A')}",
         f"**Samples:** {cfg.get('max_samples', 'N/A')}",
         "",
-        "## Answer Quality",
+    ]
+
+    # Section 1: Generation Quality
+    md.extend([
+        "## Generation Quality",
         "",
         "| Metric | Score |",
         "|--------|-------|",
-    ]
-    for k, v in metrics.items():
+    ])
+    for k, v in gen_metrics.items():
         md.append(f"| {k.upper()} | {v:.4f} |")
 
-    md.extend(
-        [
+    # Section 2: Retrieval Quality
+    if ret_metrics:
+        md.extend([
             "",
-            "## Latency",
+            "## Retrieval Quality",
             "",
-            "| Metric | Value |",
+            "| Metric | Score |",
             "|--------|-------|",
-        ]
-    )
+        ])
+        for k, v in ret_metrics.items():
+            label = k.replace("_", " ").title()
+            md.append(f"| {label} | {v:.4f} |")
+
+    # Section 3: Faithfulness & Hallucination
+    if faith_metrics:
+        md.extend([
+            "",
+            f"## Faithfulness & Hallucination (Judge: {cfg.get('judge_model', 'N/A')})",
+            "",
+            "| Metric | Score |",
+            "|--------|-------|",
+        ])
+        for k, v in faith_metrics.items():
+            label = k.replace("_", " ").title()
+            md.append(f"| {label} | {v:.4f} |")
+
+    # Latency
+    md.extend([
+        "",
+        "## Latency",
+        "",
+        "| Metric | Value |",
+        "|--------|-------|",
+    ])
     for k, v in latency.items():
         unit = "ms" if "ms" in k else ("USD" if "cost" in k else "")
         md.append(f"| {k} | {v:.2f} {unit} |")

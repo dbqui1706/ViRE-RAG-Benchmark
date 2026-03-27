@@ -18,10 +18,12 @@ dependencies = [
     "pandas>=2.0",
     "numpy>=2.0",
     "tqdm>=4.67",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-mock>=3.14"]
+semantic = ["bert-score>=0.3", "sentence-transformers>=2.0"]
 
 [project.scripts]
 vi-rag-bench = "rag_bench.cli:main"

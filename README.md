@@ -1,4 +1,4 @@
-# ViRE: Vietnamese Information Retrieval Evaluation Toolkit (RAG Benchmark)
+# ViRAG: Vietnamese Information Retrieval Evaluation Toolkit (RAG Benchmark)
 
 A lightweight, LlamaIndex-based toolkit for benchmarking Native Retrieval-Augmented Generation (RAG) performance on Vietnamese datasets.
 
