@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
-import json
 import re
 import string
 from typing import Any
 
 from rouge_score import rouge_scorer
+from sentence_transformers.util import cos_sim
 
 _scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=False)
 
@@ -91,13 +91,11 @@ def compute_semantic_similarity(prediction: str, gold: str, model_name: str = "s
     global _st_model
     if _st_model is None:
         from sentence_transformers import SentenceTransformer
+        
         _st_model = SentenceTransformer(model_name)
 
     embeddings = _st_model.encode([prediction, gold])
-    from numpy import dot
-    from numpy.linalg import norm
-    cos_sim = dot(embeddings[0], embeddings[1]) / (norm(embeddings[0]) * norm(embeddings[1]))
-    return float(cos_sim)
+    return cos_sim(embeddings[0], embeddings[1]).item()
 
 
 def evaluate_answer(prediction: str, gold: str, include_semantic: bool = False) -> dict:
