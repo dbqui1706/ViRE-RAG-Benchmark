@@ -43,6 +43,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--list-models", action="store_true", help="List available embedding models"
     )
+    # Chunking options
+    parser.add_argument(
+        "--chunk-strategy", default="passthrough",
+        choices=["passthrough", "recursive"],
+        help="Chunking strategy: passthrough (no chunking) or recursive (256 tokens)",
+    )
+    parser.add_argument("--chunk-size", type=int, default=256, help="Chunk size in tokens")
+    parser.add_argument("--chunk-overlap", type=int, default=50, help="Chunk overlap in tokens")
     # Evaluation options
     parser.add_argument(
         "--semantic", action="store_true",
@@ -88,6 +96,9 @@ def main(argv: list[str] | None = None) -> None:
             output_dir=args.output_dir,
             chroma_dir=args.chroma_dir,
             force_reindex=args.force,
+            chunk_strategy=args.chunk_strategy,
+            chunk_size=args.chunk_size,
+            chunk_overlap=args.chunk_overlap,
             include_semantic=args.semantic,
             eval_faithfulness=args.eval_faithfulness,
             judge_model=args.judge_model,

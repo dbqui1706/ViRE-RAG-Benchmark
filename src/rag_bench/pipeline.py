@@ -6,7 +6,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from .chunker import PassthroughChunker
+from .chunker import get_chunker
 from .config import RagConfig
 from .data_loader import load_and_sample
 from .embeddings.registry import get_embed_model
@@ -40,9 +40,15 @@ def run_pipeline(config: RagConfig) -> dict:
     )
     print(f"[Pipeline] Loaded {len(docs)} documents, {len(qa_pairs)} QA pairs")
 
-    # 2. Chunk (passthrough for Native RAG)
-    chunker = PassthroughChunker()
+    # 2. Chunk
+    chunker = get_chunker(
+        config.chunk_strategy,
+        chunk_size=config.chunk_size,
+        chunk_overlap=config.chunk_overlap,
+    )
+    before_chunk = len(docs)
     docs = chunker.chunk(docs)
+    print(f"[Pipeline] Chunking ({config.chunk_strategy}): {before_chunk} → {len(docs)} chunks")
 
     # 3. Get embedding model
     print(f"[Pipeline] Loading embedding model: {config.embed_model}")
@@ -146,6 +152,7 @@ def run_pipeline(config: RagConfig) -> dict:
             "dataset": dataset_name,
             "embed_model": config.embed_model,
             "llm_model": config.llm_model,
+            "chunk_strategy": config.chunk_strategy,
             "top_k": config.top_k,
             "max_samples": config.max_samples,
             "include_semantic": config.include_semantic,

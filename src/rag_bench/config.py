@@ -23,6 +23,10 @@ class RagConfig:
     output_dir: str = "outputs/rag"
     prefer_unique: bool = True
     force_reindex: bool = False
+    # Chunking options
+    chunk_strategy: str = "passthrough"
+    chunk_size: int = 256
+    chunk_overlap: int = 50
     # Evaluation options
     include_semantic: bool = False
     eval_faithfulness: bool = False
