@@ -25,6 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-mock>=3.14"]
 semantic = ["bert-score>=0.3", "sentence-transformers>=2.0"]
+evaluation = ["ragas>=0.2"]
 
 [project.scripts]
 vi-rag-bench = "rag_bench.cli:main"

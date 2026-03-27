@@ -1,5 +1,4 @@
-"""RAG evaluation metrics — Generation, Retrieval, and Faithfulness.
-"""
+"""RAG evaluation metrics — Generation, Retrieval, and Faithfulness."""
 
 from __future__ import annotations
 
@@ -12,9 +11,7 @@ from sentence_transformers.util import cos_sim
 
 _scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=False)
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _normalize(text: str) -> str:
@@ -23,6 +20,7 @@ def _normalize(text: str) -> str:
     text = text.translate(str.maketrans("", "", string.punctuation))
     text = re.sub(r"\s+", " ", text)
     return text
+
 
 # Section 1: Generation Quality
 
@@ -58,16 +56,7 @@ _st_model = None
 
 
 def compute_bert_score(prediction: str, gold: str, model_type: str = "bert-base-multilingual-cased") -> float:
-    """BERTScore F1 using contextual embeddings (lazy-loaded).
-
-    Args:
-        prediction: Generated answer.
-        gold: Reference answer.
-        model_type: HuggingFace model for BERTScore.
-
-    Returns:
-        BERTScore F1 (float).
-    """
+    """BERTScore F1 using contextual embeddings (lazy-loaded)."""
     global _bert_scorer
     if _bert_scorer is None:
         from bert_score import BERTScorer
@@ -78,20 +67,10 @@ def compute_bert_score(prediction: str, gold: str, model_type: str = "bert-base-
 
 
 def compute_semantic_similarity(prediction: str, gold: str, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2") -> float:
-    """Cosine similarity of sentence embeddings (lazy-loaded).
-
-    Args:
-        prediction: Generated answer.
-        gold: Reference answer.
-        model_name: Sentence-transformer model name.
-
-    Returns:
-        Cosine similarity (float, -1 to 1).
-    """
+    """Cosine similarity of sentence embeddings (lazy-loaded)."""
     global _st_model
     if _st_model is None:
         from sentence_transformers import SentenceTransformer
-        
         _st_model = SentenceTransformer(model_name)
 
     embeddings = _st_model.encode([prediction, gold])
@@ -99,16 +78,7 @@ def compute_semantic_similarity(prediction: str, gold: str, model_name: str = "s
 
 
 def evaluate_answer(prediction: str, gold: str, include_semantic: bool = False) -> dict:
-    """Compute generation quality metrics.
-
-    Args:
-        prediction: Generated answer text.
-        gold: Reference (gold) answer text.
-        include_semantic: If True, also compute BERTScore and Semantic Similarity.
-
-    Returns:
-        Dict with metric scores.
-    """
+    """Compute generation quality metrics."""
     scores = {
         "f1": token_f1(prediction, gold),
         "rouge_l": rouge_l(prediction, gold),
@@ -121,25 +91,31 @@ def evaluate_answer(prediction: str, gold: str, include_semantic: bool = False) 
 
 # Section 2: Retrieval Quality
 
-def context_match(retrieved_text: str, gold_context: str, threshold: float = 0.8) -> bool:
-    """Check if gold context is substantially contained in retrieved text.
-
-    Uses normalized token overlap: |intersection(retrieved, gold)| / |gold_tokens|.
-
-    Args:
-        retrieved_text: Text from a retrieved node.
-        gold_context: Gold-standard context from dataset.
-        threshold: Minimum overlap ratio to consider a match.
+def context_overlap(retrieved_text: str, gold_context: str) -> float:
+    """Compute normalized token overlap ratio between retrieved text and gold context.
 
     Returns:
-        True if overlap ratio >= threshold.
+        Overlap ratio (0.0 to 1.0): |intersection| / |gold_tokens|
     """
     ret_tokens = set(_normalize(retrieved_text).split())
     gold_tokens = set(_normalize(gold_context).split())
     if not gold_tokens:
-        return False
-    overlap = len(ret_tokens & gold_tokens) / len(gold_tokens)
-    return overlap >= threshold
+        return 0.0
+    return len(ret_tokens & gold_tokens) / len(gold_tokens)
+
+
+def context_match(retrieved_text: str, gold_context: str, threshold: float = 0.5) -> bool:
+    """Check if gold context is substantially contained in retrieved text.
+
+    Args:
+        retrieved_text: Text from a retrieved document.
+        gold_context: Gold-standard context from dataset.
+        threshold: Minimum overlap ratio to consider a match (default: 0.5).
+
+    Returns:
+        True if overlap ratio >= threshold.
+    """
+    return context_overlap(retrieved_text, gold_context) >= threshold
 
 
 def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> dict:
@@ -151,9 +127,8 @@ def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> d
         k: Top-K to evaluate against.
 
     Returns:
-        Dict with context_precision, context_recall, mrr, hit_rate.
+        Dict with context_precision, context_recall, mrr, hit_rate, best_overlap.
     """
-    # Extract text from documents
     texts = []
     for doc in documents[:k]:
         if hasattr(doc, "page_content"):
@@ -167,10 +142,12 @@ def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> d
             "context_recall": 0.0,
             "mrr": 0.0,
             "hit_rate": 0.0,
+            "best_overlap": 0.0,
         }
 
-    # Check each retrieved node for match
-    matches = [context_match(text, gold_context) for text in texts]
+    # Compute continuous overlap for each retrieved doc
+    overlaps = [context_overlap(text, gold_context) for text in texts]
+    matches = [o >= 0.5 for o in overlaps]
 
     # Context Precision@K: fraction of retrieved docs that match
     context_precision = sum(matches) / len(matches)
@@ -188,12 +165,51 @@ def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> d
     # Hit Rate@K: same as context_recall for single-gold
     hit_rate = context_recall
 
+    # Best overlap: highest overlap score among retrieved docs
+    best_overlap = max(overlaps)
+
     return {
         "context_precision": context_precision,
         "context_recall": context_recall,
         "mrr": mrr,
         "hit_rate": hit_rate,
+        "best_overlap": best_overlap,
     }
 
 
-# Section 3: Faithfulness & Hallucination (LLM-as-Judge)
+# Section 3: RAGAS Evaluation (LLM-based metrics)
+
+def run_ragas_evaluation(
+    per_query_data: list[dict],
+    llm,
+) -> dict:
+    """Run RAGAS evaluation on per-query results.
+
+    Args:
+        per_query_data: List of dicts, each with:
+            - user_input: question string
+            - retrieved_contexts: list[str] of retrieved context texts
+            - response: predicted answer string
+            - reference: gold answer string
+        llm: A ChatOpenAI (or compatible) LLM instance.
+
+    Returns:
+        Dict with aggregate RAGAS scores:
+            - context_recall (float)
+            - faithfulness (float)
+            - factual_correctness (float)
+    """
+    from ragas import evaluate, EvaluationDataset
+    from ragas.llms import LangchainLLMWrapper
+    from ragas.metrics import LLMContextRecall, Faithfulness, FactualCorrectness
+
+    dataset = EvaluationDataset.from_list(per_query_data)
+    evaluator_llm = LangchainLLMWrapper(llm)
+
+    result = evaluate(
+        dataset=dataset,
+        metrics=[LLMContextRecall(), Faithfulness(), FactualCorrectness()],
+        llm=evaluator_llm,
+    )
+
+    return dict(result)

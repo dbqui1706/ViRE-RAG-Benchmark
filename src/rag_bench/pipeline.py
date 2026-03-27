@@ -10,7 +10,7 @@ from .chunker import get_chunker
 from .config import RagConfig
 from .data_loader import load_and_sample
 from .embeddings.registry import get_embed_model
-from .evaluator import evaluate_answer, evaluate_retrieval
+from .evaluator import evaluate_answer, evaluate_retrieval, run_ragas_evaluation
 from .generator import FPTGenerator
 from .indexer import build_vectorstore
 from .reporter import save_results
@@ -136,6 +136,22 @@ def run_pipeline(config: RagConfig) -> dict:
         "total_output_tokens": sum(q["output_tokens"] for q in per_query),
     }
 
+    # 7b. RAGAS evaluation (LLM-based, optional)
+    ragas_metrics = {}
+    if config.eval_faithfulness:
+        print("[Pipeline] Running RAGAS evaluation (LLMContextRecall, Faithfulness, FactualCorrectness)...")
+        ragas_data = [
+            {
+                "user_input": per_query[i]["question"],
+                "retrieved_contexts": [doc.page_content for doc in retrieval_results[i].documents],
+                "response": per_query[i]["predicted_answer"],
+                "reference": per_query[i]["gold_answer"],
+            }
+            for i in range(len(per_query))
+        ]
+        ragas_metrics = run_ragas_evaluation(ragas_data, llm.llm)
+        print(f"[Pipeline] RAGAS: {ragas_metrics}")
+
     results = {
         "config": {
             "dataset": dataset_name,
@@ -146,10 +162,11 @@ def run_pipeline(config: RagConfig) -> dict:
             "max_samples": config.max_samples,
             "max_workers": config.max_workers,
             "include_semantic": config.include_semantic,
+            "eval_faithfulness": config.eval_faithfulness,
         },
         "generation_metrics": avg_generation,
         "retrieval_metrics": avg_retrieval,
-        "faithfulness_metrics": {},
+        "ragas_metrics": ragas_metrics,
         "latency": avg_latency,
         "per_query": per_query,
     }
