@@ -51,6 +51,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--chunk-size", type=int, default=256, help="Chunk size in tokens")
     parser.add_argument("--chunk-overlap", type=int, default=50, help="Chunk overlap in tokens")
+    # Batch generation
+    parser.add_argument("--max-workers", type=int, default=5, help="Max concurrent API calls")
     # Evaluation options
     parser.add_argument(
         "--semantic", action="store_true",
@@ -99,6 +101,7 @@ def main(argv: list[str] | None = None) -> None:
             chunk_strategy=args.chunk_strategy,
             chunk_size=args.chunk_size,
             chunk_overlap=args.chunk_overlap,
+            max_workers=args.max_workers,
             include_semantic=args.semantic,
             eval_faithfulness=args.eval_faithfulness,
             judge_model=args.judge_model,

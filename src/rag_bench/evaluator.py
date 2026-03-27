@@ -110,7 +110,6 @@ def evaluate_answer(prediction: str, gold: str, include_semantic: bool = False) 
         Dict with metric scores.
     """
     scores = {
-        "em": exact_match(prediction, gold),
         "f1": token_f1(prediction, gold),
         "rouge_l": rouge_l(prediction, gold),
     }
@@ -143,28 +142,24 @@ def context_match(retrieved_text: str, gold_context: str, threshold: float = 0.8
     return overlap >= threshold
 
 
-def evaluate_retrieval(source_nodes: list[Any], gold_context: str, k: int = 5) -> dict:
-    """Evaluate retrieval quality by comparing retrieved nodes to gold context.
+def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> dict:
+    """Evaluate retrieval quality by comparing retrieved documents to gold context.
 
     Args:
-        source_nodes: List of LlamaIndex NodeWithScore objects.
+        documents: List of LangChain Documents.
         gold_context: The gold-standard context from the dataset.
         k: Top-K to evaluate against.
 
     Returns:
         Dict with context_precision, context_recall, mrr, hit_rate.
     """
-    # Extract text from source nodes
+    # Extract text from documents
     texts = []
-    for node in source_nodes[:k]:
-        if hasattr(node, "text"):
-            texts.append(node.text)
-        elif hasattr(node, "node") and hasattr(node.node, "text"):
-            texts.append(node.node.text)
-        elif hasattr(node, "get_content"):
-            texts.append(node.get_content())
+    for doc in documents[:k]:
+        if hasattr(doc, "page_content"):
+            texts.append(doc.page_content)
         else:
-            texts.append(str(node))
+            texts.append(str(doc))
 
     if not texts:
         return {

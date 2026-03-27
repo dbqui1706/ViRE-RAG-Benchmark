@@ -1,43 +1,56 @@
-"""FPT marketplace LLM as a LlamaIndex CustomLLM."""
+"""FPT marketplace LLM — standalone HTTP client with batch support."""
 
 from __future__ import annotations
 
-import time
 import re
-from typing import Any, Sequence
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from typing import Any
 
 import requests
-from llama_index.core.llms import (
-    ChatMessage,
-    ChatResponse,
-    CompletionResponse,
-    CompletionResponseGen,
-    CustomLLM,
-    LLMMetadata,
-)
-from pydantic import Field
 
 
-class FPTGenerator(CustomLLM):
-    """FPT marketplace API wrapper compatible with LlamaIndex."""
+@dataclass
+class GenerationResult:
+    """Result of a single generation call."""
 
-    model: str = Field(default="Llama-3.3-70B-Instruct")
-    api_key: str = Field(default="")
-    base_url: str = Field(default="")
-    max_tokens: int = Field(default=512)
-    temperature: float = Field(default=0.1)
-    _last_metrics: dict = {}
+    text: str
+    generation_ms: float
+    input_tokens: int
+    output_tokens: int
 
-    @property
-    def metadata(self) -> LLMMetadata:
-        return LLMMetadata(
-            model_name=self.model,
-            context_window=4096,
-            num_output=self.max_tokens,
-            is_chat_model=True,
-        )
 
-    def complete(self, prompt: str, **kwargs: Any) -> CompletionResponse:
+class FPTGenerator:
+    """FPT marketplace API client for text generation.
+
+    No framework dependency — plain HTTP requests with timing.
+    """
+
+    def __init__(
+        self,
+        model: str = "Qwen3-32B",
+        api_key: str = "",
+        base_url: str = "",
+        max_tokens: int = 512,
+        temperature: float = 0.1,
+    ):
+        self.model = model
+        self.api_key = api_key
+        self.base_url = base_url
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+
+    def generate(self, question: str, context: str) -> GenerationResult:
+        """Generate an answer for a question given context.
+
+        Args:
+            question: The user question.
+            context: Retrieved context to ground the answer.
+
+        Returns:
+            GenerationResult with text, timing, and token counts.
+        """
         t0 = time.perf_counter()
 
         headers = {
@@ -55,14 +68,20 @@ class FPTGenerator(CustomLLM):
                         "Answer in Vietnamese. /no_think"
                     ),
                 },
-                {"role": "user", "content": prompt},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Context:\n{context}\n\n"
+                        f"Question: {question}\n\n"
+                        f"Answer:"
+                    ),
+                },
             ],
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "stream": False,
         }
 
-        # FPT API endpoint structure
         url = f"{self.base_url.rstrip('/')}/chat/completions"
         resp = requests.post(url, json=payload, headers=headers, timeout=60)
 
@@ -82,28 +101,45 @@ class FPTGenerator(CustomLLM):
         usage = data.get("usage", {})
         gen_ms = (time.perf_counter() - t0) * 1000
 
-        self._last_metrics = {
-            "generation_ms": gen_ms,
-            "input_tokens": usage.get("prompt_tokens", 0),
-            "output_tokens": usage.get("completion_tokens", 0),
-        }
-
-        return CompletionResponse(text=answer, raw=data)
-
-    def stream_complete(self, prompt: str, **kwargs: Any) -> CompletionResponseGen:
-        raise NotImplementedError("Streaming not supported for benchmarking")
-
-    def chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
-        prompt = "\n".join(f"{m.role}: {m.content}" for m in messages)
-        completion = self.complete(prompt, **kwargs)
-        return ChatResponse(
-            message=ChatMessage(role="assistant", content=completion.text),
-            raw=completion.raw,
+        return GenerationResult(
+            text=answer,
+            generation_ms=gen_ms,
+            input_tokens=usage.get("prompt_tokens", 0),
+            output_tokens=usage.get("completion_tokens", 0),
         )
 
-    def stream_chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> Any:
-        raise NotImplementedError("Streaming not supported for benchmarking")
+    def batch_generate(
+        self,
+        items: list[dict],
+        max_workers: int = 5,
+    ) -> list[GenerationResult]:
+        """Generate answers for multiple questions concurrently.
 
-    def get_last_metrics(self) -> dict:
-        """Return metrics from the most recent API call."""
-        return self._last_metrics.copy()
+        Args:
+            items: List of dicts with 'question' and 'context' keys.
+            max_workers: Max concurrent API calls.
+
+        Returns:
+            List of GenerationResult in the same order as items.
+        """
+        results: list[GenerationResult | None] = [None] * len(items)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {
+                executor.submit(self.generate, item["question"], item["context"]): i
+                for i, item in enumerate(items)
+            }
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as e:
+                    # Return empty result on failure
+                    results[idx] = GenerationResult(
+                        text=f"[ERROR: {e}]",
+                        generation_ms=0.0,
+                        input_tokens=0,
+                        output_tokens=0,
+                    )
+
+        return results  # type: ignore[return-value]

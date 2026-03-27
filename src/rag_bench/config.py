@@ -27,6 +27,8 @@ class RagConfig:
     chunk_strategy: str = "passthrough"
     chunk_size: int = 256
     chunk_overlap: int = 50
+    # Batch generation
+    max_workers: int = 5
     # Evaluation options
     include_semantic: bool = False
     eval_faithfulness: bool = False

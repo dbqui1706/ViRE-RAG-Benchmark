@@ -1,11 +1,11 @@
-"""Load CSV datasets and convert to LlamaIndex Documents."""
+"""Load CSV datasets and convert to LangChain Documents."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import pandas as pd
-from llama_index.core import Document
+from langchain_core.documents import Document
 
 # Column name mappings for different dataset schemas
 _COLUMN_MAP = {
@@ -33,7 +33,7 @@ def load_and_sample(
     seed: int = 42,
     prefer_unique: bool = True,
 ) -> tuple[list[Document], list[dict]]:
-    """Load a CSV and return LlamaIndex Documents + QA pairs.
+    """Load a CSV and return LangChain Documents + QA pairs.
 
     Args:
         csv_path: Path to the CSV file.
@@ -42,8 +42,8 @@ def load_and_sample(
         prefer_unique: If True, prefer rows with unique contexts.
 
     Returns:
-        (documents, qa_pairs) where documents have context as text
-        and qa_pairs are dicts with {qid, question, answer}.
+        (documents, qa_pairs) where documents have context as page_content
+        and qa_pairs are dicts with {qid, question, answer, context}.
     """
     path = Path(csv_path)
     dataset_name = path.stem
@@ -65,9 +65,8 @@ def load_and_sample(
     qa_pairs = []
     for _, row in df.iterrows():
         doc = Document(
-            text=str(row["context"]),
+            page_content=str(row["context"]),
             metadata={"qid": str(row["qid"]), "source": dataset_name},
-            doc_id=f"{dataset_name}_{row['qid']}",
         )
         documents.append(doc)
         qa_pairs.append(

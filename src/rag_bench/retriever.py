@@ -1,4 +1,4 @@
-"""Query engine wrapper with latency tracking."""
+"""Retrieval — separated from generation for batch processing."""
 
 from __future__ import annotations
 
@@ -6,52 +6,58 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from .timer import QueryMetrics
+from langchain_chroma import Chroma
+from langchain_core.documents import Document
 
 
 @dataclass
-class QueryResult:
-    """Result of a single RAG query with timing."""
+class RetrievalResult:
+    """Result of retrieving context for a single question."""
 
     question: str
-    answer: str
-    source_nodes: list[Any]
-    metrics: QueryMetrics
+    documents: list[Document]
+    retrieval_ms: float
 
 
-def query_with_timing(
-    query_engine: Any,
+def retrieve_context(
+    vectorstore: Chroma,
     question: str,
-    llm: Any,
-) -> QueryResult:
-    """Run a query and track retrieval + generation latency.
+    k: int = 5,
+) -> RetrievalResult:
+    """Retrieve top-K relevant documents for a question.
 
     Args:
-        query_engine: LlamaIndex QueryEngine.
-        question: The question to ask.
-        llm: The FPTGenerator (to extract last_metrics).
+        vectorstore: Chroma vector store.
+        question: The user question.
+        k: Number of documents to retrieve.
 
     Returns:
-        QueryResult with answer, sources, and timing.
+        RetrievalResult with documents and timing.
     """
     t0 = time.perf_counter()
-    response = query_engine.query(question)
-    total_ms = (time.perf_counter() - t0) * 1000
+    docs = vectorstore.similarity_search(question, k=k)
+    retrieval_ms = (time.perf_counter() - t0) * 1000
 
-    llm_metrics = llm.get_last_metrics() if hasattr(llm, "get_last_metrics") else {}
-    gen_ms = llm_metrics.get("generation_ms", 0.0)
-    retrieval_ms = total_ms - gen_ms
-
-    metrics = QueryMetrics(
-        retrieval_ms=max(retrieval_ms, 0.0),
-        generation_ms=gen_ms,
-        input_tokens=llm_metrics.get("input_tokens", 0),
-        output_tokens=llm_metrics.get("output_tokens", 0),
-    )
-
-    return QueryResult(
+    return RetrievalResult(
         question=question,
-        answer=str(response),
-        source_nodes=response.source_nodes if hasattr(response, "source_nodes") else [],
-        metrics=metrics,
+        documents=docs,
+        retrieval_ms=retrieval_ms,
     )
+
+
+def batch_retrieve(
+    vectorstore: Chroma,
+    questions: list[str],
+    k: int = 5,
+) -> list[RetrievalResult]:
+    """Retrieve contexts for all questions (sequential — fast enough for vector search).
+
+    Args:
+        vectorstore: Chroma vector store.
+        questions: List of questions.
+        k: Number of documents per question.
+
+    Returns:
+        List of RetrievalResult in same order.
+    """
+    return [retrieve_context(vectorstore, q, k) for q in questions]
