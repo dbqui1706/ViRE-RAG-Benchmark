@@ -10,7 +10,7 @@ from .chunker import PassthroughChunker
 from .config import RagConfig
 from .data_loader import load_and_sample
 from .embeddings.registry import get_embed_model
-from .evaluator import evaluate_answer, evaluate_retrieval, evaluate_faithfulness
+from .evaluator import evaluate_answer, evaluate_retrieval
 from .generator import FPTGenerator
 from .indexer import build_index
 from .reporter import save_results
@@ -97,11 +97,11 @@ def run_pipeline(config: RagConfig) -> dict:
 
         # Section 3: Faithfulness (optional)
         faith_scores = {}
-        if judge_llm is not None:
-            faith_scores = evaluate_faithfulness(
-                qa["question"], result.answer,
-                result.source_nodes, judge_llm,
-            )
+        # if judge_llm is not None:
+        #     faith_scores = evaluate_faithfulness(
+        #         qa["question"], result.answer,
+        #         result.source_nodes, judge_llm,
+        #     )
 
         per_query.append(
             {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import re
 from typing import Any, Sequence
 
 import requests
@@ -51,7 +52,7 @@ class FPTGenerator(CustomLLM):
                     "content": (
                         "You are a helpful Vietnamese QA assistant. "
                         "Answer the question based only on the provided context. "
-                        "Answer in Vietnamese."
+                        "Answer in Vietnamese. /no_think"
                     ),
                 },
                 {"role": "user", "content": prompt},
@@ -77,6 +78,7 @@ class FPTGenerator(CustomLLM):
         data = resp.json()
 
         answer = data["choices"][0]["message"]["content"]
+        answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
         usage = data.get("usage", {})
         gen_ms = (time.perf_counter() - t0) * 1000
 
