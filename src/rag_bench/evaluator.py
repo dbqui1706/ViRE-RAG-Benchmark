@@ -1,9 +1,4 @@
 """RAG evaluation metrics — Generation, Retrieval, and Faithfulness.
-
-Organized in three sections:
-  Section 1: Generation Quality (EM, F1, ROUGE-L, BERTScore, Semantic Sim)
-  Section 2: Retrieval Quality (Context Precision/Recall, MRR, Hit Rate)
-  Section 3: Faithfulness & Hallucination (LLM-as-Judge)
 """
 
 from __future__ import annotations
@@ -29,11 +24,7 @@ def _normalize(text: str) -> str:
     text = re.sub(r"\s+", " ", text)
     return text
 
-
-# ===========================================================================
 # Section 1: Generation Quality
-# ===========================================================================
-
 
 def exact_match(prediction: str, gold: str) -> float:
     """1.0 if normalized texts are identical, else 0.0."""
@@ -131,10 +122,7 @@ def evaluate_answer(prediction: str, gold: str, include_semantic: bool = False) 
     return scores
 
 
-# ===========================================================================
 # Section 2: Retrieval Quality
-# ===========================================================================
-
 
 def context_match(retrieved_text: str, gold_context: str, threshold: float = 0.8) -> bool:
     """Check if gold context is substantially contained in retrieved text.
@@ -215,116 +203,4 @@ def evaluate_retrieval(source_nodes: list[Any], gold_context: str, k: int = 5) -
     }
 
 
-# ===========================================================================
 # Section 3: Faithfulness & Hallucination (LLM-as-Judge)
-# ===========================================================================
-
-_FAITHFULNESS_PROMPT = """Given the following context and answer, evaluate whether each claim in the answer is supported by the context.
-
-Context:
-{context}
-
-Answer:
-{answer}
-
-Instructions:
-1. List each distinct claim in the answer
-2. For each claim, determine if it is SUPPORTED or UNSUPPORTED by the context
-3. Calculate a faithfulness score = (number of SUPPORTED claims) / (total claims)
-
-Respond ONLY in valid JSON format:
-{{"claims": [{{"claim": "...", "verdict": "SUPPORTED"}}, {{"claim": "...", "verdict": "UNSUPPORTED"}}], "score": 0.0}}"""
-
-_RELEVANCY_PROMPT = """Given the question and answer below, evaluate whether the answer addresses the question.
-
-Question:
-{question}
-
-Answer:
-{answer}
-
-Score from 0.0 (completely irrelevant) to 1.0 (perfectly relevant).
-
-Respond ONLY in valid JSON format:
-{{"score": 0.0, "reasoning": "..."}}"""
-
-
-def _parse_json_response(text: str) -> dict:
-    """Extract JSON from LLM response, handling markdown code blocks."""
-    # Try to find JSON in code block
-    json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if json_match:
-        text = json_match.group(1)
-    else:
-        # Try to find raw JSON object
-        json_match = re.search(r"\{.*\}", text, re.DOTALL)
-        if json_match:
-            text = json_match.group(0)
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return {}
-
-
-def evaluate_faithfulness(
-    question: str,
-    answer: str,
-    source_nodes: list[Any],
-    judge_llm: Any,
-) -> dict:
-    """Evaluate faithfulness and answer relevancy using LLM-as-Judge.
-
-    Args:
-        question: The original question.
-        answer: The generated answer.
-        source_nodes: Retrieved context nodes.
-        judge_llm: An LLM instance (e.g., FPTGenerator) to use as judge.
-
-    Returns:
-        Dict with faithfulness, answer_relevancy, hallucination scores.
-    """
-    # Build combined context from source nodes
-    contexts = []
-    for node in source_nodes:
-        if hasattr(node, "text"):
-            contexts.append(node.text)
-        elif hasattr(node, "node") and hasattr(node.node, "text"):
-            contexts.append(node.node.text)
-        elif hasattr(node, "get_content"):
-            contexts.append(node.get_content())
-        else:
-            contexts.append(str(node))
-    combined_context = "\n\n".join(contexts) if contexts else "(no context retrieved)"
-
-    # --- Faithfulness ---
-    faithfulness_score = 0.0
-    try:
-        faith_prompt = _FAITHFULNESS_PROMPT.format(
-            context=combined_context, answer=answer
-        )
-        faith_response = judge_llm.complete(faith_prompt)
-        faith_text = faith_response.text if hasattr(faith_response, "text") else str(faith_response)
-        faith_data = _parse_json_response(faith_text)
-        faithfulness_score = float(faith_data.get("score", 0.0))
-        faithfulness_score = max(0.0, min(1.0, faithfulness_score))
-    except Exception:
-        faithfulness_score = 0.0
-
-    # --- Answer Relevancy ---
-    relevancy_score = 0.0
-    try:
-        rel_prompt = _RELEVANCY_PROMPT.format(question=question, answer=answer)
-        rel_response = judge_llm.complete(rel_prompt)
-        rel_text = rel_response.text if hasattr(rel_response, "text") else str(rel_response)
-        rel_data = _parse_json_response(rel_text)
-        relevancy_score = float(rel_data.get("score", 0.0))
-        relevancy_score = max(0.0, min(1.0, relevancy_score))
-    except Exception:
-        relevancy_score = 0.0
-
-    return {
-        "faithfulness": faithfulness_score,
-        "answer_relevancy": relevancy_score,
-        "hallucination": 1.0 - faithfulness_score,
-    }
