@@ -1,4 +1,4 @@
-"""ChromaDB vector store management using LangChain."""
+"""ChromaDB vector store management"""
 
 from __future__ import annotations
 

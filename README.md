@@ -57,7 +57,7 @@ Run a benchmark on a dataset using the CLI:
 
 ```bash
 # Evaluate using the default embedding model (bge-small-en-v1.5)
-vi-rag-bench --csv data/CSConDa.csv --embed-model bge-small-en-v1.5 --max-samples 200
+vi-rag-bench --csv data/ViRe4MRC_v2.csv --embed-model bge-m3 --llm-model gpt-4o-mini --llm-base-url "" --top-k 3 --max-samples 10 --seed 42 --output-dir outputs/rag --chroma-dir outputs/rag/chroma --chunk-strategy recursive --chunk-size 512 --chunk-overlap 128 --max-workers 5 --prompt-strategy zero_shot --n-few-shot 3 --eval-faithfulness --judge-model gpt-4o-mini --force
 
 # Evaluate using ALL registered embedding models sequentially
 vi-rag-bench --csv data/CSConDa.csv --embed-model all --max-samples 200

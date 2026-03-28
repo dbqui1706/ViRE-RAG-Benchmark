@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import os
 from typing import Callable
 
 from langchain_huggingface import HuggingFaceEmbeddings
+from dotenv import load_dotenv
+
+load_dotenv()
+
+HF_TOKEN = os.getenv("HF_TOKEN", "")
+if HF_TOKEN:
+    os.environ["HF_TOKEN"] = HF_TOKEN
 
 _REGISTRY: dict[str, Callable[[], HuggingFaceEmbeddings]] = {}
-
 
 def register(key: str):
     """Decorator to register an embedding model factory."""
@@ -53,8 +60,3 @@ def _jina_v3():
 @register("bge-m3")
 def _bge_m3():
     return HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
-
-
-@register("snowflake-v2")
-def _snowflake_v2():
-    return HuggingFaceEmbeddings(model_name="Snowflake/snowflake-arctic-embed-l-v2.0")
