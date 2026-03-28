@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import string
 from typing import Any
+from collections import Counter
 
 from rouge_score import rouge_scorer
 from sentence_transformers.util import cos_sim
@@ -12,7 +13,6 @@ from sentence_transformers.util import cos_sim
 _scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=False)
 
 # Helpers
-
 
 def _normalize(text: str) -> str:
     """Lowercase, strip punctuation and collapse whitespace."""
@@ -35,11 +35,12 @@ def token_f1(prediction: str, gold: str) -> float:
     gold_tokens = _normalize(gold).split()
     if not pred_tokens or not gold_tokens:
         return 0.0
-    common = set(pred_tokens) & set(gold_tokens)
-    if not common:
+    common = Counter(pred_tokens) & Counter(gold_tokens)
+    num_common = sum(common.values())
+    if num_common == 0:
         return 0.0
-    precision = len(common) / len(pred_tokens)
-    recall = len(common) / len(gold_tokens)
+    precision = num_common / len(pred_tokens)
+    recall = num_common / len(gold_tokens)
     return 2 * precision * recall / (precision + recall)
 
 
@@ -49,7 +50,7 @@ def rouge_l(prediction: str, gold: str) -> float:
     return scores["rougeL"].fmeasure
 
 
-# --- Semantic metrics (lazy-loaded) ---
+# Semantic metrics (lazy-loaded)
 
 _bert_scorer = None
 _st_model = None
@@ -80,6 +81,7 @@ def compute_semantic_similarity(prediction: str, gold: str, model_name: str = "s
 def evaluate_answer(prediction: str, gold: str, include_semantic: bool = False) -> dict:
     """Compute generation quality metrics."""
     scores = {
+        "exact_match": exact_match(prediction, gold),
         "f1": token_f1(prediction, gold),
         "rouge_l": rouge_l(prediction, gold),
     }
@@ -92,16 +94,26 @@ def evaluate_answer(prediction: str, gold: str, include_semantic: bool = False) 
 # Section 2: Retrieval Quality
 
 def context_overlap(retrieved_text: str, gold_context: str) -> float:
-    """Compute normalized token overlap ratio between retrieved text and gold context.
+    """Compute bidirectional token overlap between retrieved text and gold context.
+
+    Uses max of both directions to handle chunked retrieval:
+    - forward:  sum(min_counts) / total_gold_tokens  (gold coverage)
+    - backward: sum(min_counts) / total_ret_tokens   (chunk precision)
 
     Returns:
-        Overlap ratio (0.0 to 1.0): |intersection| / |gold_tokens|
+        Max overlap ratio (0.0 to 1.0)
     """
-    ret_tokens = set(_normalize(retrieved_text).split())
-    gold_tokens = set(_normalize(gold_context).split())
-    if not gold_tokens:
+    ret_tokens = _normalize(retrieved_text).split()
+    gold_tokens = _normalize(gold_context).split()
+    if not gold_tokens or not ret_tokens:
         return 0.0
-    return len(ret_tokens & gold_tokens) / len(gold_tokens)
+    common = Counter(ret_tokens) & Counter(gold_tokens)
+    num_common = sum(common.values())
+    if num_common == 0:
+        return 0.0
+    forward = num_common / len(gold_tokens)
+    backward = num_common / len(ret_tokens)
+    return max(forward, backward)
 
 
 def context_match(retrieved_text: str, gold_context: str, threshold: float = 0.5) -> bool:
@@ -143,37 +155,50 @@ def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> d
             "mrr": 0.0,
             "hit_rate": 0.0,
             "best_overlap": 0.0,
+            "combined_overlap": 0.0,
         }
 
-    # Compute continuous overlap for each retrieved doc
+    # Per-chunk bidirectional overlap (Counter-based)
     overlaps = [context_overlap(text, gold_context) for text in texts]
     matches = [o >= 0.5 for o in overlaps]
-
+ 
+    # Combined overlap: concatenate all chunks → multiset overlap with gold
+    combined_text = " ".join(texts)
+    combined_ret_counter = Counter(_normalize(combined_text).split())
+    gold_counter = Counter(_normalize(gold_context).split())
+    gold_total = sum(gold_counter.values())
+    if gold_total > 0:
+        common = combined_ret_counter & gold_counter
+        combined_overlap = sum(common.values()) / gold_total
+    else:
+        combined_overlap = 0.0
+ 
     # Context Precision@K: fraction of retrieved docs that match
     context_precision = sum(matches) / len(matches)
-
-    # Context Recall: 1.0 if any match found
-    context_recall = 1.0 if any(matches) else 0.0
-
+ 
+    # Context Recall (continuous): token-level coverage of gold by all chunks
+    context_recall = combined_overlap
+ 
     # MRR: 1 / rank of first relevant (1-indexed)
     mrr = 0.0
     for i, m in enumerate(matches):
         if m:
             mrr = 1.0 / (i + 1)
             break
-
-    # Hit Rate@K: same as context_recall for single-gold
-    hit_rate = context_recall
-
-    # Best overlap: highest overlap score among retrieved docs
+ 
+    # Hit Rate@K: 1.0 if any chunk matches, else 0.0 (binary)
+    hit_rate = 1.0 if any(matches) else 0.0
+ 
+    # Best overlap: highest overlap score among individual chunks
     best_overlap = max(overlaps)
-
+ 
     return {
         "context_precision": context_precision,
         "context_recall": context_recall,
         "mrr": mrr,
         "hit_rate": hit_rate,
         "best_overlap": best_overlap,
+        "combined_overlap": combined_overlap,
     }
 
 
@@ -181,7 +206,9 @@ def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> d
 
 def run_ragas_evaluation(
     per_query_data: list[dict],
-    llm,
+    *,
+    model: str = "gpt-4o-mini",
+    client=None,
 ) -> dict:
     """Run RAGAS evaluation on per-query results.
 
@@ -191,7 +218,8 @@ def run_ragas_evaluation(
             - retrieved_contexts: list[str] of retrieved context texts
             - response: predicted answer string
             - reference: gold answer string
-        llm: A ChatOpenAI (or compatible) LLM instance.
+        model: Model name for llm_factory (default: "gpt-4o-mini").
+        client: An OpenAI() or AsyncOpenAI() client instance.
 
     Returns:
         Dict with aggregate RAGAS scores:
@@ -199,17 +227,28 @@ def run_ragas_evaluation(
             - faithfulness (float)
             - factual_correctness (float)
     """
-    from ragas import evaluate, EvaluationDataset
-    from ragas.llms import LangchainLLMWrapper
-    from ragas.metrics import LLMContextRecall, Faithfulness, FactualCorrectness
+    import numpy as np
+    from ragas.llms import llm_factory
+    from ragas.metrics.collections import ContextRecall, Faithfulness, FactualCorrectness
 
-    dataset = EvaluationDataset.from_list(per_query_data)
-    evaluator_llm = LangchainLLMWrapper(llm)
+    if client is None:
+        raise ValueError("client (OpenAI client instance) is required.")
 
-    result = evaluate(
-        dataset=dataset,
-        metrics=[LLMContextRecall(), Faithfulness(), FactualCorrectness()],
-        llm=evaluator_llm,
-    )
+    evaluator_llm = llm_factory(model, client=client, max_tokens=2048)
+    metrics = [
+        ContextRecall(llm=evaluator_llm),
+        Faithfulness(llm=evaluator_llm),
+        FactualCorrectness(llm=evaluator_llm),
+    ]
 
-    return dict(result)
+    # Each metric's ascore() accepts different kwargs, so filter per metric.
+    import inspect
+    scores: dict[str, float] = {}
+    for metric in metrics:
+        params = set(inspect.signature(metric.ascore).parameters) - {"self"}
+        filtered = [{k: v for k, v in d.items() if k in params} for d in per_query_data]
+        results = metric.batch_score(filtered)
+        values = [r.value for r in results]
+        scores[metric.name] = float(np.nanmean(values))
+
+    return scores
