@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -153,10 +154,10 @@ def run_pipeline(config: RagConfig) -> dict:
             "retrieval_scores": ret_scores,
         })
 
-    # 7 RAGAS evaluation (LLM-based, optional)
+    # RAGAS evaluation (LLM-based, optional)
     ragas_metrics = {}
     if config.eval_faithfulness:
-        print("[Pipeline] Running RAGAS evaluation (ContextRecall, Faithfulness, FactualCorrectness)...")
+        print("[Pipeline] Running RAGAS evaluation (Faithfulness, FactualCorrectness, ContextPrecision, ContextRecall)...")
         ragas_data = [
             {
                 "user_input": g["question"],
@@ -168,9 +169,9 @@ def run_pipeline(config: RagConfig) -> dict:
         ]
         # AsyncOpenAI for RAGAS evaluation
         ragas_client = AsyncOpenAI(api_key=config.llm_api_key)
-        ragas_metrics = run_ragas_evaluation(
+        ragas_metrics = asyncio.run(run_ragas_evaluation(
             ragas_data, model="gpt-4o-mini", client=ragas_client,
-        )
+        ))
         print(f"[Pipeline] RAGAS: {ragas_metrics}")
 
     # Aggregate metrics
