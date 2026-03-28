@@ -20,9 +20,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="bge-small-en-v1.5",
         help=f"Embedding model key or 'all'. Available: {', '.join(list_models())}",
     )
-    parser.add_argument("--llm-provider", default="fpt", help="LLM provider")
     parser.add_argument(
-        "--llm-model", default="Qwen3-32B", help="LLM model name"
+        "--llm-model", default="gpt-4o-mini", help="LLM model name (default: gpt-4o-mini)"
+    )
+    parser.add_argument(
+        "--llm-base-url", default="",
+        help="Custom API base URL (empty = OpenAI default; set for FPT/other)",
     )
     parser.add_argument(
         "--top-k", type=int, default=5, help="Top-K documents to retrieve"
@@ -45,7 +48,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     # Chunking options
     parser.add_argument(
-        "--chunk-strategy", default="passthrough",
+        "--chunk-strategy", default="recursive",
         choices=["passthrough", "recursive"],
         help="Chunking strategy: passthrough (no chunking) or recursive (256 tokens)",
     )
@@ -53,6 +56,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--chunk-overlap", type=int, default=50, help="Chunk overlap in tokens")
     # Batch generation
     parser.add_argument("--max-workers", type=int, default=5, help="Max concurrent API calls")
+    # Prompt strategy
+    parser.add_argument(
+        "--prompt-strategy", default="zero_shot",
+        choices=["zero_shot", "few_shot"],
+        help="Prompt strategy: zero_shot or few_shot (auto-selected from dataset)",
+    )
+    parser.add_argument(
+        "--n-few-shot", type=int, default=3,
+        help="Number of few-shot examples to auto-select from dataset (default: 3)",
+    )
     # Evaluation options
     parser.add_argument(
         "--semantic", action="store_true",
@@ -92,6 +105,7 @@ def main(argv: list[str] | None = None) -> None:
             csv_path=args.csv,
             embed_model=model_key,
             llm_model=args.llm_model,
+            llm_base_url=args.llm_base_url,
             top_k=args.top_k,
             max_samples=args.max_samples,
             sample_seed=args.seed,
@@ -102,6 +116,8 @@ def main(argv: list[str] | None = None) -> None:
             chunk_size=args.chunk_size,
             chunk_overlap=args.chunk_overlap,
             max_workers=args.max_workers,
+            prompt_strategy=args.prompt_strategy,
+            n_few_shot=args.n_few_shot,
             include_semantic=args.semantic,
             eval_faithfulness=args.eval_faithfulness,
             judge_model=args.judge_model,
