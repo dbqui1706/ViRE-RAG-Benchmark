@@ -12,10 +12,9 @@ class RagConfig:
 
     csv_path: str
     embed_model: str
-    llm_provider: str = "fpt"
-    llm_model: str = "Qwen3-32B"
+    llm_model: str = "gpt-4o-mini"
     llm_api_key: str = ""
-    llm_base_url: str = ""
+    llm_base_url: str = ""  # Empty = use OpenAI default; set for FPT/custom
     top_k: int = 5
     max_samples: int = 200
     sample_seed: int = 42
@@ -24,11 +23,14 @@ class RagConfig:
     prefer_unique: bool = True
     force_reindex: bool = False
     # Chunking options
-    chunk_strategy: str = "passthrough"
+    chunk_strategy: str = "recursive"
     chunk_size: int = 256
     chunk_overlap: int = 50
     # Batch generation
     max_workers: int = 5
+    # Prompt strategy
+    prompt_strategy: str = "zero_shot"  # "zero_shot" or "few_shot"
+    n_few_shot: int = 3  # Number of few-shot examples (auto-selected from dataset)
     # Evaluation options
     include_semantic: bool = False
     eval_faithfulness: bool = False
@@ -36,7 +38,11 @@ class RagConfig:
 
     @classmethod
     def from_env(cls, **kwargs) -> RagConfig:
-        """Create config, filling API credentials from environment."""
-        kwargs.setdefault("llm_api_key", os.environ.get("FPT_API_KEY", ""))
-        kwargs.setdefault("llm_base_url", os.environ.get("FPT_BASE_URL", ""))
+        """Create config, filling API credentials from environment.
+
+        Uses OPENAI_API_KEY by default.
+        Set FPT_BASE_URL + FPT_API_KEY to use FPT endpoint instead.
+        """
+        kwargs.setdefault("llm_api_key", os.environ.get("OPENAI_API_KEY", ""))
+        kwargs.setdefault("llm_base_url", os.environ.get("LLM_BASE_URL", ""))
         return cls(**kwargs)
