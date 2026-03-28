@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import string
 from typing import Any
 from collections import Counter
 
+import numpy as np
+from pydantic import BaseModel
+from tqdm.asyncio import tqdm
 from rouge_score import rouge_scorer
 from sentence_transformers.util import cos_sim
+from ragas import experiment, EvaluationDataset, SingleTurnSample
+from ragas.llms import llm_factory
+from ragas.metrics.collections import (
+    Faithfulness,
+    FactualCorrectness,
+    ContextPrecision,
+    ContextRecall,
+    AnswerRelevancy,
+)
 
 _scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=False)
 
@@ -204,51 +217,119 @@ def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> d
 
 # Section 3: RAGAS Evaluation (LLM-based metrics)
 
-def run_ragas_evaluation(
+class ExperimentResult(BaseModel):
+    faithfulness: float
+    factual_correctness: float
+    context_precision: float
+    context_recall: float
+    answer_relevancy: float | None = None
+
+
+def build_eval_dataset(per_query_data: list[dict]) -> EvaluationDataset:
+    samples = []
+    for d in per_query_data:
+        samples.append(SingleTurnSample(
+            user_input=d["user_input"],
+            retrieved_contexts=d["retrieved_contexts"],
+            response=d["response"],
+            reference=d["reference"],
+        ))
+    return EvaluationDataset(samples=samples)
+
+
+async def run_ragas_evaluation(
     per_query_data: list[dict],
     *,
     model: str = "gpt-4o-mini",
+    embedding_model: str = "text-embedding-3-small",
     client=None,
+    include_answer_relevancy: bool = False,
 ) -> dict:
-    """Run RAGAS evaluation on per-query results.
-
-    Args:
-        per_query_data: List of dicts, each with:
-            - user_input: question string
-            - retrieved_contexts: list[str] of retrieved context texts
-            - response: predicted answer string
-            - reference: gold answer string
-        model: Model name for llm_factory (default: "gpt-4o-mini").
-        client: An OpenAI() or AsyncOpenAI() client instance.
-
-    Returns:
-        Dict with aggregate RAGAS scores:
-            - context_recall (float)
-            - faithfulness (float)
-            - factual_correctness (float)
-    """
-    import numpy as np
-    from ragas.llms import llm_factory
-    from ragas.metrics.collections import ContextRecall, Faithfulness, FactualCorrectness
-
     if client is None:
-        raise ValueError("client (OpenAI client instance) is required.")
+        raise ValueError("client (AsyncOpenAI client instance) is required.")
 
-    evaluator_llm = llm_factory(model, client=client, max_tokens=2048)
-    metrics = [
-        ContextRecall(llm=evaluator_llm),
-        Faithfulness(llm=evaluator_llm),
-        FactualCorrectness(llm=evaluator_llm),
-    ]
+    llm = llm_factory(model, client=client, max_tokens=2048)
 
-    # Each metric's ascore() accepts different kwargs, so filter per metric.
-    import inspect
-    scores: dict[str, float] = {}
-    for metric in metrics:
-        params = set(inspect.signature(metric.ascore).parameters) - {"self"}
-        filtered = [{k: v for k, v in d.items() if k in params} for d in per_query_data]
-        results = metric.batch_score(filtered)
-        values = [r.value for r in results]
-        scores[metric.name] = float(np.nanmean(values))
+    # Define metrics
+    faithfulness = Faithfulness(llm=llm)
+    factual_correctness = FactualCorrectness(llm=llm)
+    context_precision = ContextPrecision(llm=llm)
+    context_recall = ContextRecall(llm=llm)
+
+    answer_relevancy = None
+    if include_answer_relevancy:
+        from ragas.metrics.collections import AnswerRelevancy
+        from ragas.embeddings.base import embedding_factory
+
+        evaluator_embeddings = embedding_factory(
+            "openai", model=embedding_model, client=client,
+        )
+        answer_relevancy = AnswerRelevancy(llm=llm, embeddings=evaluator_embeddings)
+
+    @experiment(ExperimentResult)
+    async def run_evaluation(row):
+        # Base tasks — always run
+        tasks = [
+            faithfulness.ascore(
+                user_input=row.user_input,
+                response=row.response,
+                retrieved_contexts=row.retrieved_contexts,
+            ),
+            factual_correctness.ascore(
+                response=row.response,
+                reference=row.reference,
+            ),
+            context_precision.ascore(
+                user_input=row.user_input,
+                reference=row.reference,
+                retrieved_contexts=row.retrieved_contexts,
+            ),
+            context_recall.ascore(
+                user_input=row.user_input,
+                retrieved_contexts=row.retrieved_contexts,
+                reference=row.reference,
+            ),
+        ]
+
+        if answer_relevancy is not None:
+            tasks.append(answer_relevancy.ascore(
+                user_input=row.user_input,
+                response=row.response,
+            ))
+
+        results = await asyncio.gather(*tasks)
+
+        return ExperimentResult(
+            faithfulness=results[0].value,
+            factual_correctness=results[1].value,
+            context_precision=results[2].value,
+            context_recall=results[3].value,
+            answer_relevancy=results[4].value if len(results) > 4 else None,
+        )
+
+    # Build dataset + run with bounded concurrency
+    eval_dataset = build_eval_dataset(per_query_data)
+    n = len(eval_dataset)
+    max_concurrent = 5  # limit concurrent samples to avoid rate limits
+    print(f"  [RAGAS] {n} samples, include_answer_relevancy={include_answer_relevancy}, concurrency={max_concurrent}")
+
+    semaphore = asyncio.Semaphore(max_concurrent)
+    pbar = tqdm(total=n, desc="  [RAGAS] Evaluating")
+
+    async def _bounded(sample):
+        async with semaphore:
+            result = await run_evaluation(sample)
+            pbar.update(1)
+            return result
+
+    results = await asyncio.gather(*[_bounded(s) for s in eval_dataset])
+    pbar.close()
+
+    # Aggregate scores
+    scores = {}
+    for field in ExperimentResult.model_fields:
+        values = [getattr(r, field) for r in results if getattr(r, field) is not None]
+        if values:
+            scores[field] = float(np.nanmean(values))
 
     return scores
