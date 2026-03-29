@@ -50,7 +50,7 @@ def save_results(results: dict, output_dir: str | Path) -> None:
         "|--------|-------|",
     ])
     for k, v in gen_metrics.items():
-        md.append(f"| {k.upper()} | {v:.4f} |")
+        md.append(f"| {k.upper()} | {f'{v:.4f}' if v is not None else 'N/A'} |")
 
     # Section 2: Retrieval Quality
     if ret_metrics:
@@ -63,7 +63,7 @@ def save_results(results: dict, output_dir: str | Path) -> None:
         ])
         for k, v in ret_metrics.items():
             label = k.replace("_", " ").title()
-            md.append(f"| {label} | {v:.4f} |")
+            md.append(f"| {label} | {f'{v:.4f}' if v is not None else 'N/A'} |")
 
     # Section 3: Faithfulness & Hallucination
     if faith_metrics:
@@ -76,7 +76,7 @@ def save_results(results: dict, output_dir: str | Path) -> None:
         ])
         for k, v in faith_metrics.items():
             label = k.replace("_", " ").title()
-            md.append(f"| {label} | {v:.4f} |")
+            md.append(f"| {label} | {f'{v:.4f}' if v is not None else 'N/A'} |")
 
     # Latency
     md.extend([

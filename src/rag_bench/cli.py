@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 from .config import RagConfig
 from .embeddings.registry import list_models
-from .pipeline import run_pipeline
+from .pipeline import run_pipeline, run_unified_pipeline
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -15,6 +15,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Vietnamese RAG Benchmark — evaluate RAG pipelines.",
     )
     parser.add_argument("--csv", help="Path to dataset CSV (required for benchmark runs)")
+    parser.add_argument(
+        "--unified-csv",
+        default="",
+        help="Path to unified CSV (e.g. data/unified_vqa.csv). "
+             "Triggers unified-index mode: one shared index, all --datasets evaluated against it.",
+    )
+    parser.add_argument(
+        "--datasets",
+        nargs="+",
+        default=[],
+        help="Dataset CSV paths to evaluate in unified mode (e.g. data/ALQAC.csv data/ViNewsQA.csv).",
+    )
     parser.add_argument(
         "--embed-model",
         default="bge-small-en-v1.5",
@@ -94,11 +106,44 @@ def main(argv: list[str] | None = None) -> None:
             print(f"  - {m}")
         return
 
+    models = list_models() if args.embed_model == "all" else [args.embed_model]
+
+    # ── Unified index mode ────────────────────────────────────────────────────
+    if args.unified_csv:
+        dataset_paths = args.datasets or ([args.csv] if args.csv else [])
+        if not dataset_paths:
+            print("ERROR: --unified-csv requires dataset paths via --datasets or --csv")
+            return
+        for model_key in models:
+            config = RagConfig.from_env(
+                csv_path=dataset_paths[0],  # placeholder; unified pipeline uses unified_index_csv
+                embed_model=model_key,
+                llm_model=args.llm_model,
+                llm_base_url=args.llm_base_url,
+                top_k=args.top_k,
+                max_samples=args.max_samples,
+                sample_seed=args.seed,
+                output_dir=args.output_dir,
+                chroma_dir=args.chroma_dir,
+                force_reindex=args.force,
+                unified_index_csv=args.unified_csv,
+                chunk_strategy=args.chunk_strategy,
+                chunk_size=args.chunk_size,
+                chunk_overlap=args.chunk_overlap,
+                max_workers=args.max_workers,
+                prompt_strategy=args.prompt_strategy,
+                n_few_shot=args.n_few_shot,
+                include_semantic=args.semantic,
+                eval_faithfulness=args.eval_faithfulness,
+                judge_model=args.judge_model,
+            )
+            run_unified_pipeline(config, dataset_paths)
+        return
+
+    # ── Per-dataset mode (existing behaviour) ─────────────────────────────────
     if not args.csv:
         parse_args(["--help"])
         return
-
-    models = list_models() if args.embed_model == "all" else [args.embed_model]
 
     for model_key in models:
         config = RagConfig.from_env(
