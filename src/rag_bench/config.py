@@ -22,6 +22,7 @@ class RagConfig:
     output_dir: str = "outputs/rag"
     prefer_unique: bool = True
     force_reindex: bool = False
+    unified_index_csv: str = ""  # If set, build index from this CSV; queries still per dataset
     # Chunking options
     chunk_strategy: str = "recursive"
     chunk_size: int = 256

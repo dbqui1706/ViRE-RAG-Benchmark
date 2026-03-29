@@ -45,13 +45,20 @@ def load_dataset(
     df = pd.read_csv(path, encoding="utf-8")
     df = _normalize_columns(df)
 
-    required = {"question", "context", "answer"}
+    # answer is optional (e.g. ZaloLegalQA has no gold answers)
+    required = {"question", "context"}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Missing columns: {missing}")
 
+    if "answer" not in df.columns:
+        df["answer"] = ""
+    df["answer"] = df["answer"].fillna("")
+
     if prefer_unique:
         df = df.drop_duplicates(subset=["context"])
+
+    df = df.dropna(subset=["question", "context"])
 
     documents = []
     qa_pairs = []
@@ -65,7 +72,7 @@ def load_dataset(
             {
                 "qid": str(row["qid"]),
                 "question": str(row["question"]),
-                "answer": str(row["answer"]),
+                "answer": str(row["answer"]),  # may be ""
                 "context": str(row["context"]),
             }
         )

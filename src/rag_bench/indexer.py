@@ -11,6 +11,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 from .config import RagConfig
 
+UNIFIED_DATASET_NAME = "unified"
+
 
 def _collection_name(dataset: str, model_key: str) -> str:
     """Generate a valid ChromaDB collection name."""
