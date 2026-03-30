@@ -104,6 +104,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--transform-llm", default="",
         help="Model name for query transform LLM (default: from TRANSFORM_LLM_MODEL env)",
     )
+    parser.add_argument(
+        "--search-type", default="similarity",
+        choices=["similarity", "mmr", "hybrid"],
+        help="Search method: similarity (dense), mmr (diverse), hybrid (BM25+dense with RRF)",
+    )
     return parser.parse_args(argv)
 
 
@@ -152,6 +157,7 @@ def main(argv: list[str] | None = None) -> None:
                 retrieval_strategy=args.retrieval_strategy,
                 rerank=args.rerank,
                 transform_llm_model=args.transform_llm,
+                search_type=args.search_type,
             )
             run_unified_pipeline(config, dataset_paths)
         return
@@ -182,10 +188,11 @@ def main(argv: list[str] | None = None) -> None:
             include_semantic=args.semantic,
             eval_faithfulness=args.eval_faithfulness,
             judge_model=args.judge_model,
-                retrieval_strategy=args.retrieval_strategy,
-                rerank=args.rerank,
-                transform_llm_model=args.transform_llm,
-            )
+            retrieval_strategy=args.retrieval_strategy,
+            rerank=args.rerank,
+            transform_llm_model=args.transform_llm,
+            search_type=args.search_type,
+        )
         run_pipeline(config)
 
 

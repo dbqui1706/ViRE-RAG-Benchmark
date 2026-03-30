@@ -41,6 +41,7 @@ class RagConfig:
     rerank: bool = False                       # Enable reranking post-retrieval
     rerank_model: str = "bge-reranker-v2-m3"
     rerank_factor: int = 3                     # Over-retrieve k*factor, rerank to k
+    search_type: str = "similarity"            # similarity | mmr | hybrid
     # Transform LLM (separate from generation LLM, defaults to FPT)
     transform_llm_model: str = ""              # Empty = use TRANSFORM_LLM_MODEL env
     transform_llm_api_key: str = ""            # Empty = use FPT_API_KEY

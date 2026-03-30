@@ -53,6 +53,14 @@ def _build_transform_components(config: RagConfig):
     return transformer, reranker
 
 
+def _build_bm25_retriever(docs: list, k: int):
+    """Build BM25 retriever from chunked documents (for hybrid search)."""
+    from langchain_community.retrievers import BM25Retriever
+    bm25 = BM25Retriever.from_documents(docs, k=k)
+    print(f"[Pipeline] BM25 index built ({len(docs)} docs)")
+    return bm25
+
+
 def run_pipeline(config: RagConfig) -> dict:
     """Run the full RAG pipeline with batch processing.
 
@@ -69,6 +77,8 @@ def run_pipeline(config: RagConfig) -> dict:
     """
     dataset_name = Path(config.csv_path).stem
     strategy_suffix = config.retrieval_strategy
+    if config.search_type != "similarity":
+        strategy_suffix += f"+{config.search_type}"
     if config.rerank:
         strategy_suffix += "+rerank"
     out_dir = Path(config.output_dir) / dataset_name / strategy_suffix / config.embed_model
@@ -118,16 +128,19 @@ def run_pipeline(config: RagConfig) -> dict:
     print("[Pipeline] Building vector store...")
     vectorstore = build_vectorstore(docs, embed_model, config, dataset_name, config.embed_model)
 
-    # 4. Build transform components
+    # 4. Build transform components + BM25 (if hybrid)
     transformer, reranker = _build_transform_components(config)
+    bm25_retriever = _build_bm25_retriever(docs, config.top_k) if config.search_type == "hybrid" else None
 
     # 5. Batch Retrieve
     questions = [qa["question"] for qa in qa_pairs]
-    print(f"[Pipeline] Batch retrieving {len(questions)} queries (strategy={config.retrieval_strategy})...")
+    print(f"[Pipeline] Batch retrieving {len(questions)} queries (strategy={config.retrieval_strategy}, search={config.search_type})...")
     retrieval_results = batch_advanced_retrieve(
         vectorstore, questions, k=config.top_k,
         transformer=transformer, reranker=reranker,
         rerank_factor=config.rerank_factor,
+        search_type=config.search_type,
+        bm25_retriever=bm25_retriever,
     )
 
     # 5. Batch Generate
@@ -318,14 +331,17 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
     vectorstore = build_vectorstore(docs, embed_model, config, UNIFIED_DATASET_NAME, config.embed_model)
     print("[UnifiedPipeline] Unified vector store ready.")
 
-    # 4. Build transform components (once for all datasets)
+    # 4. Build transform components + BM25 (once for all datasets)
     transformer, reranker = _build_transform_components(config)
+    bm25_retriever = _build_bm25_retriever(docs, config.top_k) if config.search_type == "hybrid" else None
 
     # 5. Evaluate each dataset against shared index 
     all_results = []
     for csv_path in dataset_csv_paths:
         dataset_name = Path(csv_path).stem
         strategy_suffix = config.retrieval_strategy
+        if config.search_type != "similarity":
+            strategy_suffix += f"+{config.search_type}"
         if config.rerank:
             strategy_suffix += "+rerank"
         out_dir = Path(config.output_dir) / f"{dataset_name}_unified" / strategy_suffix / config.embed_model
@@ -349,6 +365,8 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
             vectorstore, questions, k=config.top_k,
             transformer=transformer, reranker=reranker,
             rerank_factor=config.rerank_factor,
+            search_type=config.search_type,
+            bm25_retriever=bm25_retriever,
         )
 
         llm = OpenAIGenerator(

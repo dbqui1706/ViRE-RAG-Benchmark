@@ -23,25 +23,11 @@ def retrieve_context(
     question: str,
     k: int = 5,
 ) -> RetrievalResult:
-    """Retrieve top-K relevant documents for a question.
-
-    Args:
-        vectorstore: Chroma vector store.
-        question: The user question.
-        k: Number of documents to retrieve.
-
-    Returns:
-        RetrievalResult with documents and timing.
-    """
+    """Retrieve top-K relevant documents for a question."""
     t0 = time.perf_counter()
     docs = vectorstore.similarity_search(question, k=k)
     retrieval_ms = (time.perf_counter() - t0) * 1000
-
-    return RetrievalResult(
-        question=question,
-        documents=docs,
-        retrieval_ms=retrieval_ms,
-    )
+    return RetrievalResult(question=question, documents=docs, retrieval_ms=retrieval_ms)
 
 
 def batch_retrieve(
@@ -49,18 +35,58 @@ def batch_retrieve(
     questions: list[str],
     k: int = 5,
 ) -> list[RetrievalResult]:
-    """Retrieve contexts for all questions (sequential — fast enough for vector search).
-
-    Args:
-        vectorstore: Chroma vector store.
-        questions: List of questions.
-        k: Number of documents per question.
-
-    Returns:
-        List of RetrievalResult in same order.
-    """
+    """Retrieve contexts for all questions (sequential)."""
     return [retrieve_context(vectorstore, q, k) for q in questions]
 
+
+# ---------------------------------------------------------------------------
+# Hybrid Search helpers
+# ---------------------------------------------------------------------------
+
+def _reciprocal_rank_fusion(
+    doc_lists: list[list[Document]], k_rrf: int = 60,
+) -> list[Document]:
+    """Merge multiple ranked doc lists using Reciprocal Rank Fusion (RRF).
+
+    RRF score = sum(1 / (k + rank)) for each list where doc appears.
+    Higher score = more relevant.
+    """
+    scores: dict[str, float] = {}
+    doc_map: dict[str, Document] = {}
+
+    for doc_list in doc_lists:
+        for rank, doc in enumerate(doc_list):
+            key = doc.page_content
+            if key not in doc_map:
+                doc_map[key] = doc
+            scores[key] = scores.get(key, 0.0) + 1.0 / (k_rrf + rank + 1)
+
+    sorted_keys = sorted(scores, key=scores.__getitem__, reverse=True)
+    return [doc_map[k] for k in sorted_keys]
+
+
+def _search_dense(vectorstore: Chroma, query: str, k: int, search_type: str) -> list[Document]:
+    """Dense retrieval: similarity or MMR."""
+    if search_type == "mmr":
+        return vectorstore.max_marginal_relevance_search(query, k=k, fetch_k=k * 3)
+    return vectorstore.similarity_search(query, k=k)
+
+
+def _search_hybrid(
+    vectorstore: Chroma,
+    bm25_retriever,
+    query: str,
+    k: int,
+) -> list[Document]:
+    """Hybrid search: BM25 (sparse) + Vector (dense) merged with RRF."""
+    dense_docs = vectorstore.similarity_search(query, k=k)
+    sparse_docs = bm25_retriever.invoke(query)[:k]
+    return _reciprocal_rank_fusion([dense_docs, sparse_docs])[:k]
+
+
+# ---------------------------------------------------------------------------
+# Advanced retrieve (with transform, search_type, rerank)
+# ---------------------------------------------------------------------------
 
 def advanced_retrieve(
     vectorstore: Chroma,
@@ -69,12 +95,14 @@ def advanced_retrieve(
     transformer=None,
     reranker=None,
     rerank_factor: int = 3,
+    search_type: str = "similarity",
+    bm25_retriever=None,
 ) -> RetrievalResult:
-    """Retrieve with optional query transformation and reranking.
+    """Retrieve with optional query transformation, search type, and reranking.
 
     Flow:
         1. Transform: question -> [q1, q2, ...] via transformer
-        2. Retrieve: similarity_search for each qi
+        2. Retrieve: using search_type (similarity | mmr | hybrid)
         3. Merge + dedup by page_content
         4. (Optional) Rerank: re-score, keep top-k
         5. Return top-k documents
@@ -83,14 +111,19 @@ def advanced_retrieve(
 
     # 1. Transform query
     queries = transformer.transform(question) if transformer else [question]
+    if transformer:
+        print(f"[Advanced Retrieve] Transformed query: {queries}")
 
     # 2. Determine effective k (over-retrieve if reranking)
     effective_k = k * rerank_factor if reranker else k
 
     # 3. Retrieve for all queries
-    all_docs = []
+    all_docs: list[Document] = []
     for q in queries:
-        all_docs.extend(vectorstore.similarity_search(q, k=effective_k))
+        if search_type == "hybrid" and bm25_retriever is not None:
+            all_docs.extend(_search_hybrid(vectorstore, bm25_retriever, q, effective_k))
+        else:
+            all_docs.extend(_search_dense(vectorstore, q, effective_k, search_type))
 
     # 4. Dedup by page_content
     seen: set[str] = set()
@@ -122,10 +155,14 @@ def batch_advanced_retrieve(
     transformer=None,
     reranker=None,
     rerank_factor: int = 3,
+    search_type: str = "similarity",
+    bm25_retriever=None,
 ) -> list[RetrievalResult]:
     """Batch version of advanced_retrieve."""
     return [
-        advanced_retrieve(vectorstore, q, k, transformer, reranker, rerank_factor)
+        advanced_retrieve(
+            vectorstore, q, k, transformer, reranker, rerank_factor,
+            search_type, bm25_retriever,
+        )
         for q in questions
     ]
-
