@@ -91,6 +91,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--judge-model", default="",
         help="Model name for LLM-as-Judge (required with --eval-faithfulness)",
     )
+    # Advanced retrieval options
+    parser.add_argument(
+        "--retrieval-strategy", default="baseline",
+        help="Query transform strategy: baseline, multi_query (default: baseline)",
+    )
+    parser.add_argument(
+        "--rerank", action="store_true",
+        help="Enable reranking with FPT bge-reranker-v2-m3",
+    )
+    parser.add_argument(
+        "--transform-llm", default="",
+        help="Model name for query transform LLM (default: from TRANSFORM_LLM_MODEL env)",
+    )
     return parser.parse_args(argv)
 
 
@@ -108,7 +121,7 @@ def main(argv: list[str] | None = None) -> None:
 
     models = list_models() if args.embed_model == "all" else [args.embed_model]
 
-    # ── Unified index mode ────────────────────────────────────────────────────
+    #  Unified index mode
     if args.unified_csv:
         dataset_paths = args.datasets or ([args.csv] if args.csv else [])
         if not dataset_paths:
@@ -136,6 +149,9 @@ def main(argv: list[str] | None = None) -> None:
                 include_semantic=args.semantic,
                 eval_faithfulness=args.eval_faithfulness,
                 judge_model=args.judge_model,
+                retrieval_strategy=args.retrieval_strategy,
+                rerank=args.rerank,
+                transform_llm_model=args.transform_llm,
             )
             run_unified_pipeline(config, dataset_paths)
         return
@@ -166,7 +182,10 @@ def main(argv: list[str] | None = None) -> None:
             include_semantic=args.semantic,
             eval_faithfulness=args.eval_faithfulness,
             judge_model=args.judge_model,
-        )
+                retrieval_strategy=args.retrieval_strategy,
+                rerank=args.rerank,
+                transform_llm_model=args.transform_llm,
+            )
         run_pipeline(config)
 
 

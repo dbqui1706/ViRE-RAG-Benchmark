@@ -18,7 +18,39 @@ from .evaluator import evaluate_answer, evaluate_retrieval, run_ragas_evaluation
 from .generator import OpenAIGenerator
 from .indexer import build_vectorstore, UNIFIED_DATASET_NAME
 from .reporter import save_results
-from .retriever import batch_retrieve
+from .query_transforms import get_transformer
+from .reranker import FPTReranker
+from .retriever import batch_retrieve, batch_advanced_retrieve
+
+
+def _build_transform_components(config: RagConfig):
+    """Build query transformer and optional reranker from config.
+
+    Returns:
+        (transformer, reranker) tuple. Both may be None for baseline.
+    """
+    from langchain_openai import ChatOpenAI
+
+    transformer = None
+    if config.retrieval_strategy != "baseline":
+        transform_llm = ChatOpenAI(
+            model=config.transform_llm_model,
+            openai_api_key=config.transform_llm_api_key,
+            openai_api_base=config.transform_llm_base_url or None,
+            temperature=0.0,
+        )
+        transformer = get_transformer(config.retrieval_strategy, llm=transform_llm)
+        print(f"[Pipeline] Query transformer: {config.retrieval_strategy}")
+
+    reranker = None
+    if config.rerank:
+        reranker = FPTReranker(
+            api_key=config.transform_llm_api_key,
+            model=config.rerank_model,
+        )
+        print(f"[Pipeline] Reranker: {config.rerank_model}")
+
+    return transformer, reranker
 
 
 def run_pipeline(config: RagConfig) -> dict:
@@ -36,7 +68,10 @@ def run_pipeline(config: RagConfig) -> dict:
         Results dict with config, metrics, latency, and per-query details.
     """
     dataset_name = Path(config.csv_path).stem
-    out_dir = Path(config.output_dir) / dataset_name / config.embed_model
+    strategy_suffix = config.retrieval_strategy
+    if config.rerank:
+        strategy_suffix += "+rerank"
+    out_dir = Path(config.output_dir) / dataset_name / strategy_suffix / config.embed_model
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"[Pipeline] Dataset: {dataset_name}, Embedding: {config.embed_model}")
 
@@ -83,10 +118,17 @@ def run_pipeline(config: RagConfig) -> dict:
     print("[Pipeline] Building vector store...")
     vectorstore = build_vectorstore(docs, embed_model, config, dataset_name, config.embed_model)
 
-    # 4. Batch Retrieve
+    # 4. Build transform components
+    transformer, reranker = _build_transform_components(config)
+
+    # 5. Batch Retrieve
     questions = [qa["question"] for qa in qa_pairs]
-    print(f"[Pipeline] Batch retrieving {len(questions)} queries...")
-    retrieval_results = batch_retrieve(vectorstore, questions, k=config.top_k)
+    print(f"[Pipeline] Batch retrieving {len(questions)} queries (strategy={config.retrieval_strategy})...")
+    retrieval_results = batch_advanced_retrieve(
+        vectorstore, questions, k=config.top_k,
+        transformer=transformer, reranker=reranker,
+        rerank_factor=config.rerank_factor,
+    )
 
     # 5. Batch Generate
     llm = OpenAIGenerator(
@@ -255,12 +297,12 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
     """
     assert config.unified_index_csv, "unified_index_csv must be set in config"
 
-    # ── 1. Load unified CSV for indexing ──────────────────────────────────────
+    # 1. Load unified CSV for indexing 
     print(f"[UnifiedPipeline] Loading unified index source: {config.unified_index_csv}")
     all_docs, _ = load_dataset(config.unified_index_csv, prefer_unique=config.prefer_unique)
     print(f"[UnifiedPipeline] {len(all_docs)} documents from unified CSV")
 
-    # ── 2. Chunk ───────────────────────────────────────────────────────────────
+    # 2. Chunk 
     chunker = get_chunker(
         config.chunk_strategy,
         chunk_size=config.chunk_size,
@@ -269,18 +311,24 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
     docs = chunker.chunk(all_docs)
     print(f"[UnifiedPipeline] Chunking ({config.chunk_strategy}): {len(all_docs)} -> {len(docs)} chunks")
 
-    # ── 3. Build shared vector store (once) ───────────────────────────────────
+    # 3. Build shared vector store (once) 
     print(f"[UnifiedPipeline] Loading embedding model: {config.embed_model}")
     embed_model = get_embed_model(config.embed_model)
     print("[UnifiedPipeline] Building unified vector store (this may take a while)...")
     vectorstore = build_vectorstore(docs, embed_model, config, UNIFIED_DATASET_NAME, config.embed_model)
     print("[UnifiedPipeline] Unified vector store ready.")
 
-    # ── 4. Evaluate each dataset against shared index ─────────────────────────
+    # 4. Build transform components (once for all datasets)
+    transformer, reranker = _build_transform_components(config)
+
+    # 5. Evaluate each dataset against shared index 
     all_results = []
     for csv_path in dataset_csv_paths:
         dataset_name = Path(csv_path).stem
-        out_dir = Path(config.output_dir) / f"{dataset_name}_unified" / config.embed_model
+        strategy_suffix = config.retrieval_strategy
+        if config.rerank:
+            strategy_suffix += "+rerank"
+        out_dir = Path(config.output_dir) / f"{dataset_name}_unified" / strategy_suffix / config.embed_model
         out_dir.mkdir(parents=True, exist_ok=True)
         print(f"\n[UnifiedPipeline] Dataset: {dataset_name}")
 
@@ -297,7 +345,11 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
         print(f"  Sampled {len(qa_pairs)} QA pairs")
 
         questions = [qa["question"] for qa in qa_pairs]
-        retrieval_results = batch_retrieve(vectorstore, questions, k=config.top_k)
+        retrieval_results = batch_advanced_retrieve(
+            vectorstore, questions, k=config.top_k,
+            transformer=transformer, reranker=reranker,
+            rerank_factor=config.rerank_factor,
+        )
 
         llm = OpenAIGenerator(
             model=config.llm_model,
