@@ -71,4 +71,8 @@ def list_strategies() -> list[str]:
     return list(_REGISTRY.keys())
 
 
+from . import dense as _dense
+from . import bm25 as _bm25
+from . import hybrid as _hybrid
+
 __all__ = ["BaseRetriever", "RetrievalResult", "get_retriever", "list_strategies", "register"]
