@@ -21,6 +21,10 @@ if sys.platform == "win32":
 # Ensure project root is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+import pytest
+
+pytest.importorskip("ragas")
+
 import dotenv
 
 dotenv.load_dotenv()

@@ -47,7 +47,9 @@ def _mock_gen():
 def test_unified_pipeline_runs(tiny_csvs, tmp_path):
     """Unified pipeline builds one index and evaluates each dataset."""
     csv_a, csv_b, unified_csv = tiny_csvs
-    with patch("rag_bench.pipeline.OpenAIGenerator") as MockLLM:
+    from langchain_core.embeddings import FakeEmbeddings
+    with patch("rag_bench.pipeline.OpenAIGenerator") as MockLLM, \
+         patch("rag_bench.pipeline.get_embed_model", return_value=FakeEmbeddings(size=384)):
         MockLLM.return_value.batch_generate.return_value = [_mock_gen()] * 5
         config = RagConfig.from_env(
             csv_path=str(csv_a),
@@ -83,9 +85,9 @@ def test_unified_pipeline_runs(tiny_csvs, tmp_path):
 
     # Output files exist
     out = tmp_path / "outputs"
-    assert (out / "DatasetA_unified" / "bge-small-en-v1.5" / "evaluations.json").exists()
-    assert (out / "DatasetA_unified" / "bge-small-en-v1.5" / "generations.json").exists()
-    assert (out / "DatasetB_unified" / "bge-small-en-v1.5" / "evaluations.json").exists()
+    assert (out / "DatasetA_unified" / "baseline" / "bge-small-en-v1.5" / "evaluations.json").exists()
+    assert (out / "DatasetA_unified" / "baseline" / "bge-small-en-v1.5" / "generations.json").exists()
+    assert (out / "DatasetB_unified" / "baseline" / "bge-small-en-v1.5" / "evaluations.json").exists()
 
 
 def test_unified_pipeline_requires_unified_index_csv():

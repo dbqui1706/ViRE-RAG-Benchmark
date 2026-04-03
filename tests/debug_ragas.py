@@ -1,6 +1,10 @@
 """Quick test: single RAGAS call with gpt-4o-mini."""
 import os
 
+import pytest
+
+pytest.importorskip("ragas")
+
 import dotenv
 
 dotenv.load_dotenv()

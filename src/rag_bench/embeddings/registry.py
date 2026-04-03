@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from typing import Any
 
 from dotenv import load_dotenv
-from langchain_huggingface import HuggingFaceEmbeddings
 
 load_dotenv()
 
@@ -14,19 +14,19 @@ HF_TOKEN = os.getenv("HF_TOKEN", "")
 if HF_TOKEN:
     os.environ["HF_TOKEN"] = HF_TOKEN
 
-_REGISTRY: dict[str, Callable[[], HuggingFaceEmbeddings]] = {}
+_REGISTRY: dict[str, Callable[[], Any]] = {}
 
 def register(key: str):
     """Decorator to register an embedding model factory."""
 
-    def decorator(factory: Callable[[], HuggingFaceEmbeddings]):
+    def decorator(factory: Callable[[], Any]):
         _REGISTRY[key] = factory
         return factory
 
     return decorator
 
 
-def get_embed_model(key: str) -> HuggingFaceEmbeddings:
+def get_embed_model(key: str) -> Any:
     """Get an embedding model by registry key."""
     if key not in _REGISTRY:
         available = ", ".join(sorted(_REGISTRY.keys()))
@@ -39,17 +39,19 @@ def list_models() -> list[str]:
     return sorted(_REGISTRY.keys())
 
 
-import torch  # noqa: E402
-
-
 def _get_model_kwargs() -> dict:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    try:
+        import torch
+        device = "cuda" if getattr(torch, "cuda", None) and torch.cuda.is_available() else "cpu"
+    except ImportError:
+        device = "cpu"
     return {"device": device}
 
 # Registered models
 
 @register("bge-small-en-v1.5")
 def _bge_small_en_v1_5():
+    from langchain_huggingface import HuggingFaceEmbeddings
     return HuggingFaceEmbeddings(
         model_name="BAAI/bge-small-en-v1.5",
         model_kwargs=_get_model_kwargs()
@@ -58,6 +60,7 @@ def _bge_small_en_v1_5():
 
 @register("vietnamese-v2")
 def _vietnamese_v2():
+    from langchain_huggingface import HuggingFaceEmbeddings
     return HuggingFaceEmbeddings(
         model_name="AITeamVN/Vietnamese_Embedding_v2",
         model_kwargs=_get_model_kwargs()
@@ -66,6 +69,7 @@ def _vietnamese_v2():
 
 @register("jina-v3")
 def _jina_v3():
+    from langchain_huggingface import HuggingFaceEmbeddings
     return HuggingFaceEmbeddings(
         model_name="jinaai/jina-embeddings-v3",
         model_kwargs=_get_model_kwargs()
@@ -74,6 +78,7 @@ def _jina_v3():
 
 @register("bge-m3")
 def _bge_m3():
+    from langchain_huggingface import HuggingFaceEmbeddings
     return HuggingFaceEmbeddings(
         model_name="BAAI/bge-m3",
         model_kwargs=_get_model_kwargs()
