@@ -93,8 +93,11 @@ class DenseRetriever(BaseRetriever):
             return super().batch_retrieve(queries, **kwargs)
 
         collection = self._vs._collection  # native chromadb.Collection
+        embed_fn = self._vs._embedding_function  # same model used to build index
+
         t0 = time.perf_counter()
-        raw = collection.query(query_texts=queries, n_results=self._top_k)
+        query_embeddings = embed_fn.embed_documents(queries)
+        raw = collection.query(query_embeddings=query_embeddings, n_results=self._top_k)
         total_ms = (time.perf_counter() - t0) * 1000
         per_query_ms = total_ms / max(len(queries), 1)
 
