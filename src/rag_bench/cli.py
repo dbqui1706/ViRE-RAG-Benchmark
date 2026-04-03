@@ -50,7 +50,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--output-dir", default="outputs/rag", help="Output directory"
     )
     parser.add_argument(
-        "--chroma-dir", default="outputs/rag/chroma", help="ChromaDB storage dir"
+        "--chroma-dir", default="outputs/chroma", help="ChromaDB storage dir"
     )
     parser.add_argument(
         "--force", action="store_true", help="Force rebuild index"

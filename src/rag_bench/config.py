@@ -18,7 +18,7 @@ class RagConfig:
     top_k: int = 5
     max_samples: int = 200
     sample_seed: int = 42
-    chroma_dir: str = "outputs/rag/chroma"
+    chroma_dir: str = "outputs/chroma"
     output_dir: str = "outputs/rag"
     prefer_unique: bool = True
     force_reindex: bool = False

@@ -20,9 +20,9 @@ from .indexer import build_vectorstore, UNIFIED_DATASET_NAME
 from .reporter import save_results
 from .reranker import FPTReranker
 from .retrievers import get_retriever, list_strategies, RetrievalResult
-import rag_bench.retrievers.dense   # noqa: F401 — register 'dense'
-import rag_bench.retrievers.bm25    # noqa: F401 — register 'bm25_syl', 'bm25_word'
-import rag_bench.retrievers.hybrid  # noqa: F401 — register 'hybrid'
+import rag_bench.retrievers.dense
+import rag_bench.retrievers.bm25
+import rag_bench.retrievers.hybrid
 
 
 # ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ import rag_bench.retrievers.hybrid  # noqa: F401 — register 'hybrid'
 
 
 def _build_reranker(config: RagConfig):
-    """Build FPT cross-encoder reranker if enabled."""
+    """Build cross-encoder reranker if enabled."""
     if not config.rerank:
         return None
     reranker = FPTReranker(
@@ -295,7 +295,7 @@ def _output_dir(config: RagConfig, dataset_name: str, suffix: str = "") -> Path:
 def run_pipeline(config: RagConfig) -> dict:
     """Run full RAG pipeline on a single dataset.
 
-    Flow: Load → Chunk → Index → Retrieve → Generate → Evaluate
+    Flow: Load -> Chunk -> Index -> Retrieve -> Generate -> Evaluate
     """
     dataset_name = Path(config.csv_path).stem
     out_dir = _output_dir(config, dataset_name)
@@ -322,7 +322,7 @@ def run_pipeline(config: RagConfig) -> dict:
     # Save generations
     generations = _build_generations(qa_pairs, retrieval_results, gen_results)
     gen_path = _save_generations(generations, out_dir)
-    print(f"  Generations → {gen_path}")
+    print(f"  Generations -> {gen_path}")
 
     # Evaluate + Save
     metrics = _evaluate(config, generations, qa_pairs, dataset_name)
@@ -364,7 +364,7 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
         # Save generations
         generations = _build_generations(qa_pairs, retrieval_results, gen_results)
         gen_path = _save_generations(generations, out_dir)
-        print(f"  Generations → {gen_path}")
+        print(f"  Generations -> {gen_path}")
 
         # Evaluate + Save
         metrics = _evaluate(config, generations, qa_pairs, dataset_name)
