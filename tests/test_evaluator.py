@@ -45,6 +45,39 @@ def test_evaluate_answer_no_semantic():
     assert "semantic_sim" not in result
 
 
+def test_evaluate_answer_vietnamese():
+    result = evaluate_answer("thủ đô việt nam", "Thủ đô của Việt Nam là Hà Nội")
+    assert "f1" in result
+    assert "rouge_l" in result
+    assert result["f1"] > 0.0
+    assert result["exact_match"] == 0.0
+
+
+def test_evaluate_answer_empty_strings():
+    result = evaluate_answer("", "")
+    assert result["exact_match"] == 1.0
+    assert result["f1"] == 0.0
+
+    result2 = evaluate_answer("text", "")
+    assert result2["exact_match"] == 0.0
+    assert result2["f1"] == 0.0
+
+    result3 = evaluate_answer("", "text")
+    assert result3["exact_match"] == 0.0
+    assert result3["f1"] == 0.0
+
+
+def test_evaluate_answer_with_semantic(mocker):
+    """Test include_semantic=True with mocked semantic functions."""
+    mocker.patch("rag_bench.evaluator.compute_bert_score", return_value=0.85)
+    mocker.patch("rag_bench.evaluator.compute_semantic_similarity", return_value=0.90)
+
+    result = evaluate_answer("test answer", "test answer", include_semantic=True)
+
+    assert result["bert_score"] == 0.85
+    assert result["semantic_sim"] == 0.90
+
+
 # === Section 2: Retrieval Quality ===
 
 
@@ -65,6 +98,33 @@ def test_context_match_low_overlap():
 
 def test_context_match_empty_gold():
     assert context_match("some text", "") is False
+
+
+def test_context_overlap_edge_cases():
+    # Empty texts
+    assert context_overlap("", "") == 0.0
+    assert context_overlap("text", "") == 0.0
+    assert context_overlap("", "text") == 0.0
+
+    # Single words
+    assert context_overlap("word", "word") == 1.0
+    assert context_overlap("word", "different") == 0.0
+
+
+def test_context_match_thresholds():
+    gold = "one two three four"
+    # overlap between "one two" and "one two three four":
+    # forward (gold coverage): 2 / 4 = 0.5
+    # backward (chunk precision): 2 / 2 = 1.0
+    # max = 1.0
+    assert context_match("one two", gold, threshold=0.5) is True
+
+    # "one extra" and "one two three four":
+    # forward: 1 / 4 = 0.25
+    # backward: 1 / 2 = 0.5
+    # max = 0.5
+    assert context_match("one extra", gold, threshold=0.5) is True
+    assert context_match("one extra", gold, threshold=0.6) is False
 
 
 def test_evaluate_retrieval_no_nodes():
@@ -101,6 +161,28 @@ def test_evaluate_retrieval_no_match():
     assert result["context_recall"] == 0.0
     assert result["mrr"] == 0.0
     assert result["hit_rate"] == 0.0
+
+
+def test_evaluate_retrieval_overlap_scenarios():
+    gold = "one two three four five six"
+
+    # 0% overlap
+    docs_0 = [Document(page_content="seven eight nine ten")]
+    res_0 = evaluate_retrieval(docs_0, gold)
+    assert res_0["context_recall"] == 0.0
+    assert res_0["hit_rate"] == 0.0
+
+    # 50% overlap (3/6 tokens)
+    docs_50 = [Document(page_content="one two three extra words here")]
+    res_50 = evaluate_retrieval(docs_50, gold)
+    assert res_50["context_recall"] == 0.5
+    assert res_50["hit_rate"] == 1.0  # 3/5 overlapping ret tokens (0.6) > 0.5 threshold
+
+    # 100% overlap
+    docs_100 = [Document(page_content="one two three four five six")]
+    res_100 = evaluate_retrieval(docs_100, gold)
+    assert res_100["context_recall"] == 1.0
+    assert res_100["hit_rate"] == 1.0
 
 
 # === Section 3: RAGAS (import test only — actual eval needs LLM) ===
