@@ -1,13 +1,12 @@
 """Tests for HybridRetriever (Dense + BM25 with RRF)."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.documents import Document
 
 from rag_bench.retrievers.base import RetrievalResult
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -1,13 +1,12 @@
 """Tests verifying the registry-based retriever is wired into the pipeline."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.documents import Document
 
 from rag_bench.config import RagConfig
-
 
 # ---------------------------------------------------------------------------
 # Helper: minimal fake config

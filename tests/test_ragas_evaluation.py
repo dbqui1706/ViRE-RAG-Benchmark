@@ -22,11 +22,16 @@ if sys.platform == "win32":
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
-from openai import AsyncOpenAI
-from rag_bench.evaluator import run_ragas_evaluation, build_eval_dataset, ExperimentResult
+from openai import AsyncOpenAI  # noqa: E402
 
+from rag_bench.evaluator import (  # noqa: E402
+    ExperimentResult,
+    build_eval_dataset,
+    run_ragas_evaluation,
+)
 
 # ---------------------------------------------------------------------------
 # Sample data: 3 Vietnamese QA scenarios
@@ -75,7 +80,7 @@ def test_build_eval_dataset():
     dataset = build_eval_dataset(SAMPLE_DATA)
     assert len(dataset) == 3
     # Check first sample has correct fields
-    first = list(dataset)[0]
+    first = next(iter(dataset))
     assert first.user_input == SAMPLE_DATA[0]["user_input"]
     assert first.response == SAMPLE_DATA[0]["response"]
     assert first.reference == SAMPLE_DATA[0]["reference"]

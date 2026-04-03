@@ -17,7 +17,6 @@ from .base import BaseRetriever
 from .bm25 import BM25SylRetriever
 from .dense import DenseRetriever
 
-
 # ---------------------------------------------------------------------------
 # RRF helper (public — also tested directly)
 # ---------------------------------------------------------------------------

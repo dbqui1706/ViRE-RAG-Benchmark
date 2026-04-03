@@ -1,4 +1,4 @@
-from rag_bench.data_loader import load_dataset, sample_qa_pairs, load_and_sample
+from rag_bench.data_loader import load_and_sample, load_dataset, sample_qa_pairs
 
 
 def test_load_dataset(sample_csv):

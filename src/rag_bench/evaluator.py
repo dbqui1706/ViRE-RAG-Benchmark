@@ -5,23 +5,22 @@ from __future__ import annotations
 import asyncio
 import re
 import string
-from typing import Any
 from collections import Counter
+from typing import Any
 
 import numpy as np
 from pydantic import BaseModel
-from tqdm.asyncio import tqdm
-from rouge_score import rouge_scorer
-from sentence_transformers.util import cos_sim
-from ragas import experiment, EvaluationDataset, SingleTurnSample
+from ragas import EvaluationDataset, SingleTurnSample, experiment
 from ragas.llms import llm_factory
 from ragas.metrics.collections import (
-    Faithfulness,
-    FactualCorrectness,
     ContextPrecision,
     ContextRecall,
-    AnswerRelevancy,
+    FactualCorrectness,
+    Faithfulness,
 )
+from rouge_score import rouge_scorer
+from sentence_transformers.util import cos_sim
+from tqdm.asyncio import tqdm
 
 _scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=False)
 
@@ -76,7 +75,7 @@ def compute_bert_score(prediction: str, gold: str, model_type: str = "bert-base-
         from bert_score import BERTScorer
         _bert_scorer = BERTScorer(model_type=model_type, lang="vi", rescale_with_baseline=False)
 
-    P, R, F1 = _bert_scorer.score([prediction], [gold])
+    _, _, F1 = _bert_scorer.score([prediction], [gold])
     return F1.item()
 
 
@@ -174,7 +173,7 @@ def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> d
     # Per-chunk bidirectional overlap (Counter-based)
     overlaps = [context_overlap(text, gold_context) for text in texts]
     matches = [o >= 0.5 for o in overlaps]
- 
+
     # Combined overlap: concatenate all chunks → multiset overlap with gold
     combined_text = " ".join(texts)
     combined_ret_counter = Counter(_normalize(combined_text).split())
@@ -185,26 +184,26 @@ def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> d
         combined_overlap = sum(common.values()) / gold_total
     else:
         combined_overlap = 0.0
- 
+
     # Context Precision@K: fraction of retrieved docs that match
     context_precision = sum(matches) / len(matches)
- 
+
     # Context Recall (continuous): token-level coverage of gold by all chunks
     context_recall = combined_overlap
- 
+
     # MRR: 1 / rank of first relevant (1-indexed)
     mrr = 0.0
     for i, m in enumerate(matches):
         if m:
             mrr = 1.0 / (i + 1)
             break
- 
+
     # Hit Rate@K: 1.0 if any chunk matches, else 0.0 (binary)
     hit_rate = 1.0 if any(matches) else 0.0
- 
+
     # Best overlap: highest overlap score among individual chunks
     best_overlap = max(overlaps)
- 
+
     return {
         "context_precision": context_precision,
         "context_recall": context_recall,
@@ -258,8 +257,8 @@ async def run_ragas_evaluation(
 
     answer_relevancy = None
     if include_answer_relevancy:
-        from ragas.metrics.collections import AnswerRelevancy
         from ragas.embeddings.base import embedding_factory
+        from ragas.metrics.collections import AnswerRelevancy
 
         evaluator_embeddings = embedding_factory(
             "openai", model=embedding_model, client=client,

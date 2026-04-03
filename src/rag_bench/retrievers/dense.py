@@ -106,7 +106,7 @@ class DenseRetriever(BaseRetriever):
             docs = [
                 Document(page_content=text, metadata=meta or {})
                 for text, meta in zip(
-                    raw["documents"][i], raw["metadatas"][i]
+                    raw["documents"][i], raw["metadatas"][i], strict=False
                 )
             ]
             results.append(

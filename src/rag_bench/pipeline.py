@@ -7,8 +7,8 @@ import json
 import os
 from pathlib import Path
 
-from tqdm import tqdm
 from openai import AsyncOpenAI
+from tqdm import tqdm
 
 from .chunker import get_chunker
 from .config import RagConfig
@@ -16,14 +16,10 @@ from .data_loader import load_dataset, sample_qa_pairs, split_few_shot_examples
 from .embeddings.registry import get_embed_model
 from .evaluator import evaluate_answer, evaluate_retrieval, run_ragas_evaluation
 from .generator import OpenAIGenerator
-from .indexer import build_vectorstore, UNIFIED_DATASET_NAME
+from .indexer import UNIFIED_DATASET_NAME, build_vectorstore
 from .reporter import save_results
 from .reranker import FPTReranker
-from .retrievers import get_retriever, list_strategies, RetrievalResult
-import rag_bench.retrievers.dense
-import rag_bench.retrievers.bm25
-import rag_bench.retrievers.hybrid
-
+from .retrievers import RetrievalResult, get_retriever, list_strategies
 
 # ---------------------------------------------------------------------------
 # Factory helpers

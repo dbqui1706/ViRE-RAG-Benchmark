@@ -20,7 +20,6 @@ from underthesea import word_tokenize
 from . import register
 from .base import BaseRetriever
 
-
 # ---------------------------------------------------------------------------
 # Tokenizers (module-level, easy to mock in tests)
 # ---------------------------------------------------------------------------
@@ -104,7 +103,7 @@ class _BM25BaseRetriever(BaseRetriever):
 
         # Pair each doc with its score, sort descending, take top_k
         ranked = sorted(
-            zip(scores, self._documents), key=lambda x: x[0], reverse=True
+            zip(scores, self._documents, strict=False), key=lambda x: x[0], reverse=True
         )
         return [doc for _, doc in ranked[: self._top_k]]
 

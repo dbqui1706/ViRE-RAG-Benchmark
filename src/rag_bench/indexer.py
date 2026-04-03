@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import chromadb
@@ -48,10 +49,8 @@ def build_vectorstore(
     client = chromadb.PersistentClient(path=chroma_path)
 
     if config.force_reindex:
-        try:
+        with contextlib.suppress(Exception):
             client.delete_collection(col_name)
-        except Exception:
-            pass
 
     collection = client.get_or_create_collection(col_name)
 
