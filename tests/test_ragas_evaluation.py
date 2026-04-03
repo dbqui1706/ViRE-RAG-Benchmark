@@ -25,6 +25,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+pytest = __import__("pytest")
+pytest.importorskip("ragas")
+
 from openai import AsyncOpenAI  # noqa: E402
 
 from rag_bench.evaluator import (  # noqa: E402

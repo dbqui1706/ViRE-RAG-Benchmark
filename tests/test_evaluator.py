@@ -1,3 +1,4 @@
+import pytest
 from langchain_core.documents import Document
 
 from rag_bench.evaluator import (
@@ -7,7 +8,6 @@ from rag_bench.evaluator import (
     evaluate_retrieval,
     exact_match,
     rouge_l,
-    run_ragas_evaluation,
     token_f1,
 )
 
@@ -110,5 +110,7 @@ def test_evaluate_retrieval_no_match():
 # === Section 3: RAGAS (import test only — actual eval needs LLM) ===
 
 def test_ragas_importable():
-    """Verify RAGAS function is importable."""
+    """Verify RAGAS function is importable when ragas is installed."""
+    pytest.importorskip("ragas")
+    from rag_bench.evaluator import run_ragas_evaluation
     assert callable(run_ragas_evaluation)

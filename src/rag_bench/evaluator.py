@@ -10,17 +10,7 @@ from typing import Any
 
 import numpy as np
 from pydantic import BaseModel
-from ragas import EvaluationDataset, SingleTurnSample, experiment
-from ragas.llms import llm_factory
-from ragas.metrics.collections import (
-    ContextPrecision,
-    ContextRecall,
-    FactualCorrectness,
-    Faithfulness,
-)
 from rouge_score import rouge_scorer
-from sentence_transformers.util import cos_sim
-from tqdm.asyncio import tqdm
 
 _scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=False)
 
@@ -85,6 +75,8 @@ def compute_semantic_similarity(prediction: str, gold: str, model_name: str = "s
     if _st_model is None:
         from sentence_transformers import SentenceTransformer
         _st_model = SentenceTransformer(model_name)
+
+    from sentence_transformers.util import cos_sim
 
     embeddings = _st_model.encode([prediction, gold])
     return cos_sim(embeddings[0], embeddings[1]).item()
@@ -224,7 +216,9 @@ class ExperimentResult(BaseModel):
     answer_relevancy: float | None = None
 
 
-def build_eval_dataset(per_query_data: list[dict]) -> EvaluationDataset:
+def build_eval_dataset(per_query_data: list[dict]):
+    from ragas import EvaluationDataset, SingleTurnSample
+
     samples = []
     for d in per_query_data:
         samples.append(SingleTurnSample(
@@ -244,6 +238,16 @@ async def run_ragas_evaluation(
     client=None,
     include_answer_relevancy: bool = False,
 ) -> dict:
+    from ragas import experiment
+    from ragas.llms import llm_factory
+    from ragas.metrics.collections import (
+        ContextPrecision,
+        ContextRecall,
+        FactualCorrectness,
+        Faithfulness,
+    )
+    from tqdm.asyncio import tqdm
+
     if client is None:
         raise ValueError("client (AsyncOpenAI client instance) is required.")
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 
-import torch
 from dotenv import load_dotenv
 from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -43,6 +42,8 @@ def list_models() -> list[str]:
 
 
 def _get_model_kwargs() -> dict:
+    import torch
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     return {"device": device}
 
