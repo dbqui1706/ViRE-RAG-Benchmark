@@ -1,10 +1,13 @@
 """Quick test: single RAGAS call with gpt-4o-mini."""
 import os
-from dotenv import load_dotenv
-load_dotenv()
 
-from openai import AsyncOpenAI
-from rag_bench.evaluator import run_ragas_evaluation
+import dotenv
+
+dotenv.load_dotenv()
+
+from openai import AsyncOpenAI  # noqa: E402
+
+from rag_bench.evaluator import run_ragas_evaluation  # noqa: E402
 
 client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
 

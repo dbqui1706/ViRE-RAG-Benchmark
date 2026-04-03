@@ -40,4 +40,4 @@ class MultiQueryTransformer(QueryTransformer):
         raw = self._chain.invoke({"question": question, "n": self.n_queries})
         variants = [line.strip() for line in raw.strip().split("\n") if line.strip()]
         # Always include original query + up to n_queries variants
-        return [question] + variants[: self.n_queries]
+        return [question, *variants[:self.n_queries]]

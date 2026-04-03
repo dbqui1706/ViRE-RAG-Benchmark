@@ -28,16 +28,15 @@ def test_pipeline_with_mock(sample_csv, tmp_path):
         mock_prompt = MagicMock()
         mock_prompt.__or__ = MagicMock(return_value=mock_chain)
         mock_build.return_value = mock_prompt
-        with patch.object(mock_chain, "__or__", return_value=mock_chain):
-            with patch("rag_bench.generator.ChatOpenAI"):
-                from rag_bench.generator import FPTGenerator
-                gen = FPTGenerator(
-                    model="test", api_key="fake", base_url="https://fake.api"
-                )
-                gen.chain = mock_chain
-                
-                with patch("rag_bench.pipeline.FPTGenerator", return_value=gen):
-                    results = run_pipeline(config)
+        with patch.object(mock_chain, "__or__", return_value=mock_chain), patch("rag_bench.generator.ChatOpenAI"):
+            from rag_bench.generator import FPTGenerator
+            gen = FPTGenerator(
+                model="test", api_key="fake", base_url="https://fake.api"
+            )
+            gen.chain = mock_chain
+
+            with patch("rag_bench.pipeline.FPTGenerator", return_value=gen):
+                results = run_pipeline(config)
 
     assert results["config"]["dataset"] == "test_dataset"
     # Generation metrics

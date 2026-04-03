@@ -5,15 +5,16 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
+from typing import Any
+from uuid import UUID
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.outputs import LLMResult
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
-from typing import Any, Union
-from uuid import UUID
 from tqdm.auto import tqdm
-from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.outputs import LLMResult
+
 
 class BatchCallback(BaseCallbackHandler):
     """Callback for batch progress bar and token tracking."""
@@ -23,7 +24,7 @@ class BatchCallback(BaseCallbackHandler):
         self.progress_bar = tqdm(total=total, desc="Generating")
         self.token_usage: list[dict] = []
 
-    def on_llm_end(self, response: LLMResult, *, run_id: UUID, parent_run_id: Union[UUID, None] = None, **kwargs: Any) -> Any:
+    def on_llm_end(self, response: LLMResult, *, run_id: UUID, parent_run_id: UUID | None = None, **kwargs: Any) -> Any:
         """Called after every LLM response — track progress and tokens."""
         self.progress_bar.update(1)
         # Extract token usage from OpenAI-compatible response

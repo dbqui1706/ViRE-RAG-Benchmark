@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Callable
+from collections.abc import Callable
 
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 
 # Registry
-_REGISTRY: dict[str, Callable[..., "QueryTransformer"]] = {}
+_REGISTRY: dict[str, Callable[..., QueryTransformer]] = {}
 
-def register(name: str) -> Callable[[type["QueryTransformer"]], type["QueryTransformer"]]:
+def register(name: str) -> Callable[[type[QueryTransformer]], type[QueryTransformer]]:
     """Decorator to register a query transformer class."""
-    def decorator(cls: type["QueryTransformer"]) -> type["QueryTransformer"]:
+    def decorator(cls: type[QueryTransformer]) -> type[QueryTransformer]:
         _REGISTRY[name] = cls
         return cls
     return decorator
 
 
-def get_transformer(key: str, **kwargs) -> "QueryTransformer":
+def get_transformer(key: str, **kwargs) -> QueryTransformer:
     """Instantiate a transformer by registry key.
 
     Args:
@@ -53,7 +53,7 @@ class QueryTransformer(ABC):
     def transform(self, query: str) -> list[str]:
         """Transform a query into multiple queries."""
         ...
-    
+
     @property
     def strategy_name(self) -> str:
         """Short key for this strategy (used in output paths)."""

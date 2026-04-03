@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from pathlib import Path
 
-from tqdm import tqdm
 from openai import AsyncOpenAI
+from tqdm import tqdm
 
 from .chunker import get_chunker
 from .config import RagConfig
@@ -16,11 +15,11 @@ from .data_loader import load_dataset, sample_qa_pairs, split_few_shot_examples
 from .embeddings.registry import get_embed_model
 from .evaluator import evaluate_answer, evaluate_retrieval, run_ragas_evaluation
 from .generator import OpenAIGenerator
-from .indexer import build_vectorstore, UNIFIED_DATASET_NAME
-from .reporter import save_results
+from .indexer import UNIFIED_DATASET_NAME, build_vectorstore
 from .query_transforms import get_transformer
+from .reporter import save_results
 from .reranker import FPTReranker
-from .retriever import batch_retrieve, batch_advanced_retrieve
+from .retriever import batch_advanced_retrieve
 
 
 def _build_transform_components(config: RagConfig):
@@ -160,7 +159,7 @@ def run_pipeline(config: RagConfig) -> dict:
     print(f"[Pipeline] Batch generating {len(gen_items)} answers (workers={config.max_workers})...")
     gen_results = llm.batch_generate(gen_items, max_workers=config.max_workers)
 
-    # 6. Save generations.json 
+    # 6. Save generations.json
     generations = []
     for i, qa in enumerate(qa_pairs):
         ret = retrieval_results[i]
@@ -310,12 +309,12 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
     """
     assert config.unified_index_csv, "unified_index_csv must be set in config"
 
-    # 1. Load unified CSV for indexing 
+    # 1. Load unified CSV for indexing
     print(f"[UnifiedPipeline] Loading unified index source: {config.unified_index_csv}")
     all_docs, _ = load_dataset(config.unified_index_csv, prefer_unique=config.prefer_unique)
     print(f"[UnifiedPipeline] {len(all_docs)} documents from unified CSV")
 
-    # 2. Chunk 
+    # 2. Chunk
     chunker = get_chunker(
         config.chunk_strategy,
         chunk_size=config.chunk_size,
@@ -324,7 +323,7 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
     docs = chunker.chunk(all_docs)
     print(f"[UnifiedPipeline] Chunking ({config.chunk_strategy}): {len(all_docs)} -> {len(docs)} chunks")
 
-    # 3. Build shared vector store (once) 
+    # 3. Build shared vector store (once)
     print(f"[UnifiedPipeline] Loading embedding model: {config.embed_model}")
     embed_model = get_embed_model(config.embed_model)
     print("[UnifiedPipeline] Building unified vector store (this may take a while)...")
@@ -335,7 +334,7 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
     transformer, reranker = _build_transform_components(config)
     bm25_retriever = _build_bm25_retriever(docs, config.top_k) if config.search_type == "hybrid" else None
 
-    # 5. Evaluate each dataset against shared index 
+    # 5. Evaluate each dataset against shared index
     all_results = []
     for csv_path in dataset_csv_paths:
         dataset_name = Path(csv_path).stem
@@ -440,7 +439,7 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
                 ragas_data, model="gpt-4o-mini", client=ragas_client,
             ))
 
-        def _avg_non_none(key: str, section: str) -> float | None:
+        def _avg_non_none(key: str, section: str, per_query_eval=per_query_eval) -> float | None:
             values = [q[section][key] for q in per_query_eval if q[section].get(key) is not None]
             return sum(values) / len(values) if values else None
 

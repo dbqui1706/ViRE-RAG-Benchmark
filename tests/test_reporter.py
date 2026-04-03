@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 from rag_bench.reporter import save_results
 
