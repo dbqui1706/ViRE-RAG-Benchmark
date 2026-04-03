@@ -20,7 +20,10 @@ from .indexer import build_vectorstore, UNIFIED_DATASET_NAME
 from .reporter import save_results
 from .query_transforms import get_transformer
 from .reranker import FPTReranker
-from .retriever import batch_retrieve, batch_advanced_retrieve
+from .retriever import batch_retrieve, batch_advanced_retrieve, RetrievalResult
+from .retrievers import get_retriever, list_strategies
+import rag_bench.retrievers.dense   # noqa: F401 — register 'dense', 'mmr'
+import rag_bench.retrievers.bm25    # noqa: F401 — register 'bm25_syl', 'bm25_word'
 
 
 def _build_transform_components(config: RagConfig):
@@ -53,12 +56,50 @@ def _build_transform_components(config: RagConfig):
     return transformer, reranker
 
 
-def _build_bm25_retriever(docs: list, k: int):
-    """Build BM25 retriever from chunked documents (for hybrid search)."""
-    from langchain_community.retrievers import BM25Retriever
-    bm25 = BM25Retriever.from_documents(docs, k=k)
-    print(f"[Pipeline] BM25 index built ({len(docs)} docs)")
-    return bm25
+def _build_retriever(config: "RagConfig", vectorstore, docs: list):
+    """Instantiate the correct retriever using the registry.
+
+    Dispatches by ``config.search_type``:
+
+    - ``'similarity'`` / ``'mmr'`` → :class:`~rag_bench.retrievers.dense.DenseRetriever`
+    - ``'bm25_syl'`` → :class:`~rag_bench.retrievers.bm25.BM25SylRetriever`
+    - ``'bm25_word'`` → :class:`~rag_bench.retrievers.bm25.BM25WordRetriever`
+    - ``'hybrid'`` → legacy BM25+Dense hybrid (kept for backward compatibility)
+
+    Args:
+        config: Experiment configuration.
+        vectorstore: Built ChromaDB Chroma instance.
+        docs: Chunked document list (needed for BM25 index building).
+
+    Returns:
+        A :class:`~rag_bench.retrievers.base.BaseRetriever` instance.
+
+    Raises:
+        ValueError: If ``config.search_type`` is not a known strategy.
+    """
+    st = config.search_type
+
+    if st in ("similarity", "mmr"):
+        return get_retriever("dense", vectorstore=vectorstore, top_k=config.top_k, search_type=st)
+
+    if st == "bm25_syl":
+        return get_retriever("bm25_syl", documents=docs, top_k=config.top_k)
+
+    if st == "bm25_word":
+        return get_retriever("bm25_word", documents=docs, top_k=config.top_k)
+
+    if st == "hybrid":
+        # Legacy hybrid: BM25 (langchain-community) + Dense via RRF
+        # Kept for backward compatibility; will be migrated to hybrid.py in Phase 3
+        from langchain_community.retrievers import BM25Retriever as _LCBm25
+        bm25 = _LCBm25.from_documents(docs, k=config.top_k)
+        print(f"[Pipeline] BM25 index built ({len(docs)} docs) for hybrid search")
+        return bm25   # returned as-is; pipeline handles hybrid separately below
+
+    available = list_strategies() + ["hybrid"]
+    raise ValueError(
+        f"Unknown search_type: '{st}'. Available: {available}"
+    )
 
 
 def run_pipeline(config: RagConfig) -> dict:
@@ -128,20 +169,35 @@ def run_pipeline(config: RagConfig) -> dict:
     print("[Pipeline] Building vector store...")
     vectorstore = build_vectorstore(docs, embed_model, config, dataset_name, config.embed_model)
 
-    # 4. Build transform components + BM25 (if hybrid)
+    # 4. Build transform components + registry retriever
     transformer, reranker = _build_transform_components(config)
-    bm25_retriever = _build_bm25_retriever(docs, config.top_k) if config.search_type == "hybrid" else None
+    retriever = _build_retriever(config, vectorstore=vectorstore, docs=docs)
+    # For legacy hybrid search, retriever is a raw BM25Retriever (not BaseRetriever)
+    is_legacy_hybrid = config.search_type == "hybrid"
+    bm25_retriever = retriever if is_legacy_hybrid else None
 
     # 5. Batch Retrieve
     questions = [qa["question"] for qa in qa_pairs]
-    print(f"[Pipeline] Batch retrieving {len(questions)} queries (strategy={config.retrieval_strategy}, search={config.search_type})...")
-    retrieval_results = batch_advanced_retrieve(
-        vectorstore, questions, k=config.top_k,
-        transformer=transformer, reranker=reranker,
-        rerank_factor=config.rerank_factor,
-        search_type=config.search_type,
-        bm25_retriever=bm25_retriever,
+    print(
+        f"[Pipeline] Batch retrieving {len(questions)} queries "
+        f"(strategy={config.retrieval_strategy}, search={config.search_type})..."
     )
+    if is_legacy_hybrid:
+        retrieval_results = batch_advanced_retrieve(
+            vectorstore, questions, k=config.top_k,
+            transformer=transformer, reranker=reranker,
+            rerank_factor=config.rerank_factor,
+            search_type=config.search_type,
+            bm25_retriever=bm25_retriever,
+        )
+    else:
+        import time
+        def _retrieve_one(q: str) -> RetrievalResult:
+            t0 = time.perf_counter()
+            docs_ret = retriever.retrieve(q)
+            ms = (time.perf_counter() - t0) * 1000
+            return RetrievalResult(question=q, documents=docs_ret, retrieval_ms=ms)
+        retrieval_results = [_retrieve_one(q) for q in questions]
 
     # 5. Batch Generate
     llm = OpenAIGenerator(
@@ -331,9 +387,11 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
     vectorstore = build_vectorstore(docs, embed_model, config, UNIFIED_DATASET_NAME, config.embed_model)
     print("[UnifiedPipeline] Unified vector store ready.")
 
-    # 4. Build transform components + BM25 (once for all datasets)
+    # 4. Build transform components + registry retriever (once for all datasets)
     transformer, reranker = _build_transform_components(config)
-    bm25_retriever = _build_bm25_retriever(docs, config.top_k) if config.search_type == "hybrid" else None
+    retriever = _build_retriever(config, vectorstore=vectorstore, docs=docs)
+    is_legacy_hybrid = config.search_type == "hybrid"
+    bm25_retriever = retriever if is_legacy_hybrid else None
 
     # 5. Evaluate each dataset against shared index 
     all_results = []
@@ -361,13 +419,22 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
         print(f"  Sampled {len(qa_pairs)} QA pairs")
 
         questions = [qa["question"] for qa in qa_pairs]
-        retrieval_results = batch_advanced_retrieve(
-            vectorstore, questions, k=config.top_k,
-            transformer=transformer, reranker=reranker,
-            rerank_factor=config.rerank_factor,
-            search_type=config.search_type,
-            bm25_retriever=bm25_retriever,
-        )
+        if is_legacy_hybrid:
+            retrieval_results = batch_advanced_retrieve(
+                vectorstore, questions, k=config.top_k,
+                transformer=transformer, reranker=reranker,
+                rerank_factor=config.rerank_factor,
+                search_type=config.search_type,
+                bm25_retriever=bm25_retriever,
+            )
+        else:
+            import time
+            def _retrieve_one(q: str) -> RetrievalResult:
+                t0 = time.perf_counter()
+                docs_ret = retriever.retrieve(q)
+                ms = (time.perf_counter() - t0) * 1000
+                return RetrievalResult(question=q, documents=docs_ret, retrieval_ms=ms)
+            retrieval_results = [_retrieve_one(q) for q in questions]
 
         llm = OpenAIGenerator(
             model=config.llm_model,
