@@ -17,7 +17,7 @@ Usage::
 """
 from __future__ import annotations
 
-from .base import BaseRetriever
+from .base import BaseRetriever, RetrievalResult
 
 _REGISTRY: dict[str, type[BaseRetriever]] = {}
 
@@ -71,4 +71,4 @@ def list_strategies() -> list[str]:
     return list(_REGISTRY.keys())
 
 
-__all__ = ["BaseRetriever", "register", "get_retriever", "list_strategies"]
+__all__ = ["BaseRetriever", "RetrievalResult", "register", "get_retriever", "list_strategies"]
