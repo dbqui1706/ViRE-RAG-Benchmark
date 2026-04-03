@@ -25,159 +25,86 @@ import rag_bench.retrievers.bm25    # noqa: F401 — register 'bm25_syl', 'bm25_
 import rag_bench.retrievers.hybrid  # noqa: F401 — register 'hybrid'
 
 
+# ---------------------------------------------------------------------------
+# Factory helpers
+# ---------------------------------------------------------------------------
+
+
 def _build_reranker(config: RagConfig):
-    """Build FPT cross-encoder reranker if enabled in config.
-
-    Args:
-        config: Experiment configuration.
-
-    Returns:
-        ``FPTReranker`` instance, or ``None`` if ``config.rerank`` is False.
-    """
+    """Build FPT cross-encoder reranker if enabled."""
     if not config.rerank:
         return None
     reranker = FPTReranker(
         api_key=os.environ.get("FPT_API_KEY", ""),
         model=config.rerank_model,
     )
-    print(f"[Pipeline] Reranker: {config.rerank_model}")
+    print(f"  Reranker: {config.rerank_model}")
     return reranker
 
-def _build_retriever(config: "RagConfig", vectorstore, docs: list):
-    """Instantiate the correct retriever using the registry.
 
-    Dispatches by ``config.search_type``:
-
-    - ``'similarity'`` / ``'mmr'`` → ``DenseRetriever``
-    - ``'bm25_syl'`` → ``BM25SylRetriever``
-    - ``'bm25_word'`` → ``BM25WordRetriever``
-    - ``'hybrid'`` → ``HybridRetriever`` (Dense + BM25 syllable + RRF)
-
-    Args:
-        config: Experiment configuration.
-        vectorstore: Built ChromaDB Chroma instance.
-        docs: Chunked document list (needed for BM25/hybrid index building).
-
-    Returns:
-        A :class:`~rag_bench.retrievers.base.BaseRetriever` instance.
-
-    Raises:
-        ValueError: If ``config.search_type`` is not a known strategy.
-    """
+def _build_retriever(config: RagConfig, vectorstore, docs: list):
+    """Instantiate retriever via the registry based on ``config.search_type``."""
     st = config.search_type
 
     if st in ("similarity", "mmr"):
         return get_retriever("dense", vectorstore=vectorstore, top_k=config.top_k, search_type=st)
-
-    if st == "bm25_syl":
-        return get_retriever("bm25_syl", documents=docs, top_k=config.top_k)
-
-    if st == "bm25_word":
-        return get_retriever("bm25_word", documents=docs, top_k=config.top_k)
-
+    if st in ("bm25_syl", "bm25_word"):
+        return get_retriever(st, documents=docs, top_k=config.top_k)
     if st == "hybrid":
         return get_retriever("hybrid", vectorstore=vectorstore, documents=docs, top_k=config.top_k)
 
-    available = list_strategies()
-    raise ValueError(
-        f"Unknown search_type: '{st}'. Available: {available}"
-    )
+    raise ValueError(f"Unknown search_type: '{st}'. Available: {list_strategies()}")
 
 
-def run_pipeline(config: RagConfig) -> dict:
-    """Run the full RAG pipeline with batch processing.
+# ---------------------------------------------------------------------------
+# Shared pipeline steps (used by both run_pipeline and run_unified_pipeline)
+# ---------------------------------------------------------------------------
 
-    Flow:
-        Load → Chunk → Index → Batch Retrieve → Batch Generate
-        → Save generations.json
-        → Evaluate → Save evaluations.json
 
-    Args:
-        config: Experiment configuration.
+def _prepare_qa(config: RagConfig, csv_path: str):
+    """Load dataset, split few-shot, sample QA pairs.
 
     Returns:
-        Results dict with config, metrics, latency, and per-query details.
+        (qa_pairs, few_shot_examples)
     """
-    dataset_name = Path(config.csv_path).stem
-    strategy_suffix = config.search_type
-    if config.rerank:
-        strategy_suffix += "+rerank"
-    out_dir = Path(config.output_dir) / dataset_name / strategy_suffix / config.embed_model
-    out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[Pipeline] Dataset: {dataset_name}, Embedding: {config.embed_model}")
+    _, all_qa = load_dataset(csv_path, prefer_unique=False)
 
-    # 1. Load ALL data (for indexing)
-    print("[Pipeline] Loading full dataset...")
-    all_docs, all_qa_pairs = load_dataset(
-        config.csv_path,
-        prefer_unique=config.prefer_unique,
-    )
-    print(f"[Pipeline] Full dataset: {len(all_docs)} documents, {len(all_qa_pairs)} QA pairs")
-
-    # Split few-shot examples (if enabled)
-    few_shot_examples = None
+    few_shot = None
     if config.prompt_strategy == "few_shot":
-        few_shot_examples, all_qa_pairs = split_few_shot_examples(
-            all_qa_pairs,
-            n_examples=config.n_few_shot,
-            seed=config.sample_seed,
+        few_shot, all_qa = split_few_shot_examples(
+            all_qa, n_examples=config.n_few_shot, seed=config.sample_seed,
         )
-        print(f"[Pipeline] Few-shot: {len(few_shot_examples)} examples extracted from dataset")
 
-    # Sample QA pairs for evaluation
-    qa_pairs = sample_qa_pairs(
-        all_qa_pairs,
-        max_samples=config.max_samples,
-        seed=config.sample_seed,
-    )
-    print(f"[Pipeline] Sampled {len(qa_pairs)} QA pairs for evaluation")
+    qa_pairs = sample_qa_pairs(all_qa, max_samples=config.max_samples, seed=config.sample_seed)
+    return qa_pairs, few_shot
 
-    # 2. Chunk
-    chunker = get_chunker(
-        config.chunk_strategy,
-        chunk_size=config.chunk_size,
-        chunk_overlap=config.chunk_overlap,
-    )
-    before_chunk = len(all_docs)
-    docs = chunker.chunk(all_docs)
-    print(f"[Pipeline] Chunking ({config.chunk_strategy}): {before_chunk} → {len(docs)} chunks")
 
-    # 3. Get embedding model & build vector store
-    print(f"[Pipeline] Loading embedding model: {config.embed_model}")
-    embed_model = get_embed_model(config.embed_model)
+def _generate(config: RagConfig, retrieval_results: list[RetrievalResult],
+              few_shot_examples=None):
+    """Run batch LLM generation over retrieval results.
 
-    print("[Pipeline] Building vector store...")
-    vectorstore = build_vectorstore(docs, embed_model, config, dataset_name, config.embed_model)
-
-    # 4. Build retriever (via registry)
-    retriever = _build_retriever(config, vectorstore=vectorstore, docs=docs)
-
-    # 5. Batch Retrieve
-    questions = [qa["question"] for qa in qa_pairs]
-    print(
-        f"[Pipeline] Batch retrieving {len(questions)} queries "
-        f"(search={config.search_type})..."
-    )
-    retrieval_results = retriever.batch_retrieve(questions)
-
-    # 5. Batch Generate
+    Returns:
+        list of generation result objects.
+    """
     llm = OpenAIGenerator(
         model=config.llm_model,
         api_key=config.llm_api_key,
         base_url=config.llm_base_url or None,
         few_shot_examples=few_shot_examples,
     )
+    gen_items = [
+        {
+            "question": r.question,
+            "context": "\n\n".join(doc.page_content for doc in r.documents),
+        }
+        for r in retrieval_results
+    ]
+    return llm.batch_generate(gen_items, max_workers=config.max_workers)
 
-    # Build generation items: question + combined retrieved context
-    gen_items = []
-    for ret_result in retrieval_results:
-        combined_context = "\n\n".join(doc.page_content for doc in ret_result.documents)
-        gen_items.append({"question": ret_result.question, "context": combined_context})
 
-    print(f"[Pipeline] Batch generating {len(gen_items)} answers (workers={config.max_workers})...")
-    gen_results = llm.batch_generate(gen_items, max_workers=config.max_workers)
-
-    # 6. Save generations.json 
+def _build_generations(qa_pairs, retrieval_results, gen_results):
+    """Combine QA pairs, retrieval results, and generation results into a
+    serializable list of dicts (``generations.json`` format)."""
     generations = []
     for i, qa in enumerate(qa_pairs):
         ret = retrieval_results[i]
@@ -194,42 +121,44 @@ def run_pipeline(config: RagConfig) -> dict:
             "input_tokens": gen.input_tokens,
             "output_tokens": gen.output_tokens,
         })
+    return generations
 
-    gen_path = out_dir / "generations.json"
-    with open(gen_path, "w", encoding="utf-8") as f:
+
+def _save_generations(generations: list[dict], out_dir: Path) -> Path:
+    """Write generations.json and return the path."""
+    path = out_dir / "generations.json"
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(generations, f, indent=2, ensure_ascii=False)
-    print(f"[Pipeline] Generations saved → {gen_path}  ({len(generations)} queries)")
+    return path
 
-    # 7. Evaluate
-    print("[Pipeline] Evaluating...")
+
+def _evaluate(config: RagConfig, generations: list[dict],
+              qa_pairs: list[dict], dataset_name: str = "") -> dict:
+    """Run evaluation (lexical + optional RAGAS) and return evaluations dict."""
+    label = f"Evaluating {dataset_name}" if dataset_name else "Evaluating"
+
     per_query_eval = []
-
-    for g in tqdm(generations, desc="Evaluating"):
-        # Section 1: Generation Quality
-        gen_scores = evaluate_answer(
-            g["predicted_answer"], g["gold_answer"],
-            include_semantic=config.include_semantic,
+    for g in tqdm(generations, desc=label):
+        has_gold = bool(g["gold_answer"].strip())
+        gen_scores = (
+            evaluate_answer(
+                g["predicted_answer"], g["gold_answer"],
+                include_semantic=config.include_semantic,
+            )
+            if has_gold
+            else {"exact_match": None, "f1": None, "rouge_l": None}
         )
-
-        # Section 2: Retrieval Quality
-        # Need original qa context for overlap-based retrieval metrics
-        qa_context = next(
-            qa["context"] for qa in qa_pairs if qa["qid"] == g["qid"]
-        )
-        ret_scores = evaluate_retrieval(
-            g["retrieved_contexts"], qa_context, k=config.top_k,
-        )
-
+        qa_context = next(qa["context"] for qa in qa_pairs if qa["qid"] == g["qid"])
+        ret_scores = evaluate_retrieval(g["retrieved_contexts"], qa_context, k=config.top_k)
         per_query_eval.append({
             "qid": g["qid"],
             "generation_scores": gen_scores,
             "retrieval_scores": ret_scores,
         })
 
-    # RAGAS evaluation (LLM-based, optional)
+    # Optional RAGAS
     ragas_metrics = {}
     if config.eval_faithfulness:
-        print("[Pipeline] Running RAGAS evaluation (Faithfulness, FactualCorrectness, ContextPrecision, ContextRecall)...")
         ragas_data = [
             {
                 "user_input": g["question"],
@@ -239,38 +168,47 @@ def run_pipeline(config: RagConfig) -> dict:
             }
             for g in generations
         ]
-        # AsyncOpenAI for RAGAS evaluation
         ragas_client = AsyncOpenAI(api_key=config.llm_api_key)
         ragas_metrics = asyncio.run(run_ragas_evaluation(
             ragas_data, model="gpt-4o-mini", client=ragas_client,
         ))
-        print(f"[Pipeline] RAGAS: {ragas_metrics}")
 
-    # Aggregate metrics
-    def _avg(key: str, section: str) -> float:
-        values = [q[section][key] for q in per_query_eval if key in q[section]]
-        return sum(values) / len(values) if values else 0.0
+    # Aggregate
+    def _avg(key, section):
+        vals = [q[section][key] for q in per_query_eval if q[section].get(key) is not None]
+        return sum(vals) / len(vals) if vals else None
 
     gen_keys = ["exact_match", "f1", "rouge_l"]
     if config.include_semantic:
         gen_keys += ["bert_score", "semantic_sim"]
 
-    avg_generation = {k: _avg(k, "generation_scores") for k in gen_keys}
-    avg_retrieval = {k: _avg(k, "retrieval_scores")
-                     for k in ["context_precision", "context_recall", "mrr", "hit_rate"]}
-
-    avg_latency = {
-        "mean_retrieval_ms": sum(g["retrieval_ms"] for g in generations) / len(generations),
-        "mean_generation_ms": sum(g["generation_ms"] for g in generations) / len(generations),
-        "mean_total_ms": sum(g["total_ms"] for g in generations) / len(generations),
-        "total_input_tokens": sum(g["input_tokens"] for g in generations),
-        "total_output_tokens": sum(g["output_tokens"] for g in generations),
+    n = len(generations)
+    return {
+        "generation_metrics": {k: _avg(k, "generation_scores") for k in gen_keys},
+        "retrieval_metrics": {
+            k: _avg(k, "retrieval_scores")
+            for k in ["context_precision", "context_recall", "mrr", "hit_rate"]
+        },
+        "ragas_metrics": ragas_metrics,
+        "latency": {
+            "mean_retrieval_ms": sum(g["retrieval_ms"] for g in generations) / n,
+            "mean_generation_ms": sum(g["generation_ms"] for g in generations) / n,
+            "mean_total_ms": sum(g["total_ms"] for g in generations) / n,
+            "total_input_tokens": sum(g["input_tokens"] for g in generations),
+            "total_output_tokens": sum(g["output_tokens"] for g in generations),
+        },
+        "per_query": per_query_eval,
     }
 
-    # 8. Save evaluations.json (scores only)
+
+def _save_evaluations(config: RagConfig, metrics: dict, out_dir: Path,
+                      dataset_name: str, index_source: str = "per_dataset"):
+    """Write evaluations.json + markdown report."""
     evaluations = {
         "config": {
             "dataset": dataset_name,
+            "index_source": index_source,
+            "search_type": config.search_type,
             "embed_model": config.embed_model,
             "llm_model": config.llm_model,
             "chunk_strategy": config.chunk_strategy,
@@ -280,221 +218,159 @@ def run_pipeline(config: RagConfig) -> dict:
             "include_semantic": config.include_semantic,
             "eval_faithfulness": config.eval_faithfulness,
         },
-        "generation_metrics": avg_generation,
-        "retrieval_metrics": avg_retrieval,
-        "ragas_metrics": ragas_metrics,
-        "latency": avg_latency,
-        "per_query": per_query_eval,
+        **metrics,
     }
-
-    eval_path = out_dir / "evaluations.json"
-    with open(eval_path, "w", encoding="utf-8") as f:
+    path = out_dir / "evaluations.json"
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(evaluations, f, indent=2, ensure_ascii=False)
-    print(f"[Pipeline] Evaluations saved -> {eval_path}")
-
-    # Also save markdown report
     save_results(evaluations, out_dir)
-
-    # Print summary
-    print(
-        f"[Pipeline] Generation: EM={avg_generation['exact_match']:.4f}  "
-        f"F1={avg_generation['f1']:.4f}  "
-        f"ROUGE-L={avg_generation['rouge_l']:.4f}"
-    )
-    print(
-        f"[Pipeline] Retrieval: Precision={avg_retrieval['context_precision']:.4f}  "
-        f"Recall={avg_retrieval['context_recall']:.4f}  "
-        f"MRR={avg_retrieval['mrr']:.4f}  HitRate={avg_retrieval['hit_rate']:.4f}"
-    )
-    print(f"[Pipeline] Avg latency={avg_latency['mean_total_ms']:.0f}ms")
-
     return evaluations
 
 
-def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> list[dict]:
-    """Run RAG pipeline with a unified index shared across all datasets.
+def _print_summary(metrics: dict):
+    """Print a compact summary of generation + retrieval metrics."""
+    gm = metrics["generation_metrics"]
+    rm = metrics["retrieval_metrics"]
+    lat = metrics["latency"]
 
-    Builds ONE vector store from config.unified_index_csv, then evaluates each
-    dataset's queries (up to config.max_samples) against it independently.
-    Output directory per dataset: <output_dir>/<dataset>_unified/<embed_model>/
+    def _fmt(v):
+        return f"{v:.4f}" if v is not None else "N/A"
 
-    Args:
-        config: Experiment config. config.unified_index_csv must be set.
-        dataset_csv_paths: Per-dataset CSV paths for query sampling.
+    print(
+        f"  Gen: EM={_fmt(gm.get('exact_match'))}  "
+        f"F1={_fmt(gm.get('f1'))}  ROUGE-L={_fmt(gm.get('rouge_l'))}"
+    )
+    print(
+        f"  Ret: P={_fmt(rm.get('context_precision'))}  "
+        f"R={_fmt(rm.get('context_recall'))}  "
+        f"MRR={_fmt(rm.get('mrr'))}  Hit={_fmt(rm.get('hit_rate'))}"
+    )
+    print(f"  Latency: {lat['mean_total_ms']:.0f}ms avg")
+
+
+# ---------------------------------------------------------------------------
+# Shared infrastructure: load, chunk, index
+# ---------------------------------------------------------------------------
+
+
+def _build_index(config: RagConfig, csv_path: str, dataset_name: str):
+    """Load → Chunk → Build vectorstore.
 
     Returns:
-        List of evaluation dicts, one per dataset.
+        (vectorstore, chunked_docs)
     """
-    assert config.unified_index_csv, "unified_index_csv must be set in config"
+    print(f"  Loading: {csv_path}")
+    all_docs, _ = load_dataset(csv_path, prefer_unique=config.prefer_unique)
+    print(f"  {len(all_docs)} documents loaded")
 
-    # 1. Load unified CSV for indexing 
-    print(f"[UnifiedPipeline] Loading unified index source: {config.unified_index_csv}")
-    all_docs, _ = load_dataset(config.unified_index_csv, prefer_unique=config.prefer_unique)
-    print(f"[UnifiedPipeline] {len(all_docs)} documents from unified CSV")
-
-    # 2. Chunk 
     chunker = get_chunker(
         config.chunk_strategy,
         chunk_size=config.chunk_size,
         chunk_overlap=config.chunk_overlap,
     )
     docs = chunker.chunk(all_docs)
-    print(f"[UnifiedPipeline] Chunking ({config.chunk_strategy}): {len(all_docs)} -> {len(docs)} chunks")
+    print(f"  Chunking ({config.chunk_strategy}): {len(all_docs)} → {len(docs)} chunks")
 
-    # 3. Build shared vector store (once) 
-    print(f"[UnifiedPipeline] Loading embedding model: {config.embed_model}")
     embed_model = get_embed_model(config.embed_model)
-    print("[UnifiedPipeline] Building unified vector store (this may take a while)...")
-    vectorstore = build_vectorstore(docs, embed_model, config, UNIFIED_DATASET_NAME, config.embed_model)
-    print("[UnifiedPipeline] Unified vector store ready.")
+    vectorstore = build_vectorstore(docs, embed_model, config, dataset_name, config.embed_model)
+    return vectorstore, docs
 
-    # 4. Build retriever (via registry, once for all datasets)
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def _output_dir(config: RagConfig, dataset_name: str, suffix: str = "") -> Path:
+    """Build output directory path."""
+    name = f"{dataset_name}{suffix}"
+    strategy = config.search_type
+    if config.rerank:
+        strategy += "+rerank"
+    out = Path(config.output_dir) / name / strategy / config.embed_model
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def run_pipeline(config: RagConfig) -> dict:
+    """Run full RAG pipeline on a single dataset.
+
+    Flow: Load → Chunk → Index → Retrieve → Generate → Evaluate
+    """
+    dataset_name = Path(config.csv_path).stem
+    out_dir = _output_dir(config, dataset_name)
+    print(f"[Pipeline] {dataset_name} | {config.search_type} | {config.embed_model}")
+
+    # Build index
+    vectorstore, docs = _build_index(config, config.csv_path, dataset_name)
+
+    # Build retriever
     retriever = _build_retriever(config, vectorstore=vectorstore, docs=docs)
 
-    # 5. Evaluate each dataset against shared index
+    # Prepare QA
+    qa_pairs, few_shot = _prepare_qa(config, config.csv_path)
+    print(f"  {len(qa_pairs)} QA pairs sampled")
+
+    # Retrieve + Generate
+    questions = [qa["question"] for qa in qa_pairs]
+    print(f"  Retrieving {len(questions)} queries ({config.search_type})...")
+    retrieval_results = retriever.batch_retrieve(questions)
+
+    print(f"  Generating {len(questions)} answers...")
+    gen_results = _generate(config, retrieval_results, few_shot)
+
+    # Save generations
+    generations = _build_generations(qa_pairs, retrieval_results, gen_results)
+    gen_path = _save_generations(generations, out_dir)
+    print(f"  Generations → {gen_path}")
+
+    # Evaluate + Save
+    metrics = _evaluate(config, generations, qa_pairs, dataset_name)
+    evaluations = _save_evaluations(config, metrics, out_dir, dataset_name)
+    _print_summary(metrics)
+
+    return evaluations
+
+
+def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> list[dict]:
+    """Run RAG pipeline with ONE shared index across multiple datasets.
+
+    Builds a single vectorstore from ``config.unified_index_csv``, then
+    evaluates each dataset's queries against it independently.
+    """
+    assert config.unified_index_csv, "unified_index_csv must be set"
+    print(f"[Unified] Building shared index from {config.unified_index_csv}")
+
+    # Build shared index once
+    vectorstore, docs = _build_index(config, config.unified_index_csv, UNIFIED_DATASET_NAME)
+    retriever = _build_retriever(config, vectorstore=vectorstore, docs=docs)
+    print("[Unified] Shared index ready.\n")
+
+    # Evaluate each dataset
     all_results = []
     for csv_path in dataset_csv_paths:
         dataset_name = Path(csv_path).stem
-        strategy_suffix = config.search_type
-        if config.rerank:
-            strategy_suffix += "+rerank"
-        out_dir = Path(config.output_dir) / f"{dataset_name}_unified" / strategy_suffix / config.embed_model
-        out_dir.mkdir(parents=True, exist_ok=True)
-        print(f"\n[UnifiedPipeline] Dataset: {dataset_name}")
+        out_dir = _output_dir(config, dataset_name, suffix="_unified")
+        print(f"[Unified] ── {dataset_name} ──")
 
-        _, all_qa_pairs = load_dataset(csv_path, prefer_unique=False)
+        qa_pairs, few_shot = _prepare_qa(config, csv_path)
+        print(f"  {len(qa_pairs)} QA pairs sampled")
 
-        few_shot_examples = None
-        if config.prompt_strategy == "few_shot":
-            few_shot_examples, all_qa_pairs = split_few_shot_examples(
-                all_qa_pairs, n_examples=config.n_few_shot, seed=config.sample_seed,
-            )
-            print(f"  Few-shot: {len(few_shot_examples)} examples")
-
-        qa_pairs = sample_qa_pairs(all_qa_pairs, max_samples=config.max_samples, seed=config.sample_seed)
-        print(f"  Sampled {len(qa_pairs)} QA pairs")
-
+        # Retrieve + Generate
         questions = [qa["question"] for qa in qa_pairs]
         retrieval_results = retriever.batch_retrieve(questions)
+        gen_results = _generate(config, retrieval_results, few_shot)
 
-        llm = OpenAIGenerator(
-            model=config.llm_model,
-            api_key=config.llm_api_key,
-            base_url=config.llm_base_url or None,
-            few_shot_examples=few_shot_examples,
-        )
-        gen_items = [
-            {"question": r.question, "context": "\n\n".join(doc.page_content for doc in r.documents)}
-            for r in retrieval_results
-        ]
-        print(f"  Generating {len(gen_items)} answers (workers={config.max_workers})...")
-        gen_results = llm.batch_generate(gen_items, max_workers=config.max_workers)
+        # Save generations
+        generations = _build_generations(qa_pairs, retrieval_results, gen_results)
+        gen_path = _save_generations(generations, out_dir)
+        print(f"  Generations → {gen_path}")
 
-        generations = []
-        for i, qa in enumerate(qa_pairs):
-            ret = retrieval_results[i]
-            gen = gen_results[i]
-            generations.append({
-                "qid": qa["qid"],
-                "question": qa["question"],
-                "gold_answer": qa["answer"],
-                "predicted_answer": gen.text,
-                "retrieved_contexts": [doc.page_content for doc in ret.documents],
-                "retrieval_ms": ret.retrieval_ms,
-                "generation_ms": gen.generation_ms,
-                "total_ms": ret.retrieval_ms + gen.generation_ms,
-                "input_tokens": gen.input_tokens,
-                "output_tokens": gen.output_tokens,
-            })
-
-        gen_path = out_dir / "generations.json"
-        with open(gen_path, "w", encoding="utf-8") as f:
-            json.dump(generations, f, indent=2, ensure_ascii=False)
-        print(f"  Generations saved -> {gen_path}")
-
-        per_query_eval = []
-        for g in tqdm(generations, desc=f"  Evaluating {dataset_name}"):
-            has_gold = bool(g["gold_answer"].strip())
-            gen_scores = (
-                evaluate_answer(
-                    g["predicted_answer"], g["gold_answer"],
-                    include_semantic=config.include_semantic,
-                )
-                if has_gold
-                else {"exact_match": None, "f1": None, "rouge_l": None}
-            )
-            qa_context = next(qa["context"] for qa in qa_pairs if qa["qid"] == g["qid"])
-            ret_scores = evaluate_retrieval(g["retrieved_contexts"], qa_context, k=config.top_k)
-            per_query_eval.append({
-                "qid": g["qid"],
-                "generation_scores": gen_scores,
-                "retrieval_scores": ret_scores,
-            })
-
-        ragas_metrics = {}
-        if config.eval_faithfulness:
-            print("  Running RAGAS evaluation...")
-            ragas_data = [
-                {
-                    "user_input": g["question"],
-                    "retrieved_contexts": g["retrieved_contexts"],
-                    "response": g["predicted_answer"],
-                    "reference": g["gold_answer"],
-                }
-                for g in generations
-            ]
-            ragas_client = AsyncOpenAI(api_key=config.llm_api_key)
-            ragas_metrics = asyncio.run(run_ragas_evaluation(
-                ragas_data, model="gpt-4o-mini", client=ragas_client,
-            ))
-
-        def _avg_non_none(key: str, section: str) -> float | None:
-            values = [q[section][key] for q in per_query_eval if q[section].get(key) is not None]
-            return sum(values) / len(values) if values else None
-
-        gen_keys = ["exact_match", "f1", "rouge_l"]
-        if config.include_semantic:
-            gen_keys += ["bert_score", "semantic_sim"]
-
-        avg_generation = {k: _avg_non_none(k, "generation_scores") for k in gen_keys}
-        avg_retrieval = {
-            k: _avg_non_none(k, "retrieval_scores")
-            for k in ["context_precision", "context_recall", "mrr", "hit_rate"]
-        }
-        avg_latency = {
-            "mean_retrieval_ms": sum(g["retrieval_ms"] for g in generations) / len(generations),
-            "mean_generation_ms": sum(g["generation_ms"] for g in generations) / len(generations),
-            "mean_total_ms": sum(g["total_ms"] for g in generations) / len(generations),
-            "total_input_tokens": sum(g["input_tokens"] for g in generations),
-            "total_output_tokens": sum(g["output_tokens"] for g in generations),
-        }
-
-        evaluations = {
-            "config": {
-                "dataset": dataset_name,
-                "index_source": "unified",
-                "embed_model": config.embed_model,
-                "llm_model": config.llm_model,
-                "chunk_strategy": config.chunk_strategy,
-                "top_k": config.top_k,
-                "max_samples": config.max_samples,
-                "max_workers": config.max_workers,
-                "include_semantic": config.include_semantic,
-                "eval_faithfulness": config.eval_faithfulness,
-            },
-            "generation_metrics": avg_generation,
-            "retrieval_metrics": avg_retrieval,
-            "ragas_metrics": ragas_metrics,
-            "latency": avg_latency,
-            "per_query": per_query_eval,
-        }
-
-        eval_path = out_dir / "evaluations.json"
-        with open(eval_path, "w", encoding="utf-8") as f:
-            json.dump(evaluations, f, indent=2, ensure_ascii=False)
-        print(f"  Evaluations saved -> {eval_path}")
-        save_results(evaluations, out_dir)
+        # Evaluate + Save
+        metrics = _evaluate(config, generations, qa_pairs, dataset_name)
+        evaluations = _save_evaluations(config, metrics, out_dir, dataset_name, "unified")
+        _print_summary(metrics)
         all_results.append(evaluations)
 
-    print("\n[UnifiedPipeline] All datasets evaluated.")
+    print(f"\n[Unified] All {len(all_results)} datasets evaluated.")
     return all_results
