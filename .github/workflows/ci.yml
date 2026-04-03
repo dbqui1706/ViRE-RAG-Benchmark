@@ -30,8 +30,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -e ".[dev,vietnamese]"
           pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install sentence-transformers
+          pip install -e ".[dev,vietnamese]"
 
       - name: Run linting
         run: |
