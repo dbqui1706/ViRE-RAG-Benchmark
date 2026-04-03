@@ -37,15 +37,10 @@ class RagConfig:
     eval_faithfulness: bool = False
     judge_model: str = ""
     # Advanced retrieval
-    retrieval_strategy: str = "baseline"       # baseline | multi_query
-    rerank: bool = False                       # Enable reranking post-retrieval
+    rerank: bool = False                       # Enable cross-encoder reranking post-retrieval
     rerank_model: str = "bge-reranker-v2-m3"
     rerank_factor: int = 3                     # Over-retrieve k*factor, rerank to k
-    search_type: str = "similarity"            # similarity | mmr | hybrid
-    # Transform LLM (separate from generation LLM, defaults to FPT)
-    transform_llm_model: str = ""              # Empty = use TRANSFORM_LLM_MODEL env
-    transform_llm_api_key: str = ""            # Empty = use FPT_API_KEY
-    transform_llm_base_url: str = ""           # Empty = use FPT_BASE_URL
+    search_type: str = "similarity"            # similarity | mmr | hybrid | bm25_syl | bm25_word
 
     @classmethod
     def from_env(cls, **kwargs) -> RagConfig:
@@ -56,8 +51,4 @@ class RagConfig:
         """
         kwargs.setdefault("llm_api_key", os.environ.get("OPENAI_API_KEY", ""))
         kwargs.setdefault("llm_base_url", os.environ.get("LLM_BASE_URL", ""))
-        # Transform LLM defaults (FPT Marketplace)
-        kwargs.setdefault("transform_llm_api_key", os.environ.get("FPT_API_KEY", ""))
-        kwargs.setdefault("transform_llm_base_url", os.environ.get("FPT_BASE_URL", ""))
-        kwargs.setdefault("transform_llm_model", os.environ.get("TRANSFORM_LLM_MODEL", ""))
         return cls(**kwargs)

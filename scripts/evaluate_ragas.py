@@ -23,6 +23,8 @@ python scripts/evaluate_ragas.py --generations outputs/rag/ViRHE4QA_v2/vietnames
 python scripts/evaluate_ragas.py --generations outputs/rag/VlogQA_2/vietnamese-v2/generations.json
 # ZaloLegalQA
 python scripts/evaluate_ragas.py --generations outputs/rag/ZaloLegalQA/vietnamese-v2/generations.json
+# ALQAC
+python scripts/evaluate_ragas.py --generations outputs/rag/ALQAC/vietnamese-v2/generations.json
 """
 
 import argparse

@@ -167,5 +167,5 @@ def main():
     scores = asyncio.run(_run_live_test())
     return scores
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()

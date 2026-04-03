@@ -18,43 +18,30 @@ from .evaluator import evaluate_answer, evaluate_retrieval, run_ragas_evaluation
 from .generator import OpenAIGenerator
 from .indexer import build_vectorstore, UNIFIED_DATASET_NAME
 from .reporter import save_results
-from .query_transforms import get_transformer
 from .reranker import FPTReranker
-from .retriever import batch_retrieve, batch_advanced_retrieve, RetrievalResult
+from .retriever import batch_advanced_retrieve, RetrievalResult
 from .retrievers import get_retriever, list_strategies
 import rag_bench.retrievers.dense   # noqa: F401 — register 'dense', 'mmr'
 import rag_bench.retrievers.bm25    # noqa: F401 — register 'bm25_syl', 'bm25_word'
 
 
-def _build_transform_components(config: RagConfig):
-    """Build query transformer and optional reranker from config.
+def _build_reranker(config: RagConfig):
+    """Build FPT cross-encoder reranker if enabled in config.
+
+    Args:
+        config: Experiment configuration.
 
     Returns:
-        (transformer, reranker) tuple. Both may be None for baseline.
+        ``FPTReranker`` instance, or ``None`` if ``config.rerank`` is False.
     """
-    from langchain_openai import ChatOpenAI
-
-    transformer = None
-    if config.retrieval_strategy != "baseline":
-        transform_llm = ChatOpenAI(
-            model=config.transform_llm_model,
-            openai_api_key=config.transform_llm_api_key,
-            openai_api_base=config.transform_llm_base_url or None,
-            temperature=0.0,
-        )
-        transformer = get_transformer(config.retrieval_strategy, llm=transform_llm)
-        print(f"[Pipeline] Query transformer: {config.retrieval_strategy}")
-
-    reranker = None
-    if config.rerank:
-        reranker = FPTReranker(
-            api_key=config.transform_llm_api_key,
-            model=config.rerank_model,
-        )
-        print(f"[Pipeline] Reranker: {config.rerank_model}")
-
-    return transformer, reranker
-
+    if not config.rerank:
+        return None
+    reranker = FPTReranker(
+        api_key=os.environ.get("FPT_API_KEY", ""),
+        model=config.rerank_model,
+    )
+    print(f"[Pipeline] Reranker: {config.rerank_model}")
+    return reranker
 
 def _build_retriever(config: "RagConfig", vectorstore, docs: list):
     """Instantiate the correct retriever using the registry.
@@ -169,8 +156,8 @@ def run_pipeline(config: RagConfig) -> dict:
     print("[Pipeline] Building vector store...")
     vectorstore = build_vectorstore(docs, embed_model, config, dataset_name, config.embed_model)
 
-    # 4. Build transform components + registry retriever
-    transformer, reranker = _build_transform_components(config)
+    # 4. Build reranker + registry retriever
+    reranker = _build_reranker(config)
     retriever = _build_retriever(config, vectorstore=vectorstore, docs=docs)
     # For legacy hybrid search, retriever is a raw BM25Retriever (not BaseRetriever)
     is_legacy_hybrid = config.search_type == "hybrid"
@@ -180,12 +167,12 @@ def run_pipeline(config: RagConfig) -> dict:
     questions = [qa["question"] for qa in qa_pairs]
     print(
         f"[Pipeline] Batch retrieving {len(questions)} queries "
-        f"(strategy={config.retrieval_strategy}, search={config.search_type})..."
+        f"(search={config.search_type})..."
     )
     if is_legacy_hybrid:
         retrieval_results = batch_advanced_retrieve(
             vectorstore, questions, k=config.top_k,
-            transformer=transformer, reranker=reranker,
+            reranker=reranker,
             rerank_factor=config.rerank_factor,
             search_type=config.search_type,
             bm25_retriever=bm25_retriever,
@@ -387,19 +374,17 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
     vectorstore = build_vectorstore(docs, embed_model, config, UNIFIED_DATASET_NAME, config.embed_model)
     print("[UnifiedPipeline] Unified vector store ready.")
 
-    # 4. Build transform components + registry retriever (once for all datasets)
-    transformer, reranker = _build_transform_components(config)
+    # 4. Build reranker + registry retriever (once for all datasets)
+    reranker = _build_reranker(config)
     retriever = _build_retriever(config, vectorstore=vectorstore, docs=docs)
     is_legacy_hybrid = config.search_type == "hybrid"
     bm25_retriever = retriever if is_legacy_hybrid else None
 
-    # 5. Evaluate each dataset against shared index 
+    # 5. Evaluate each dataset against shared index
     all_results = []
     for csv_path in dataset_csv_paths:
         dataset_name = Path(csv_path).stem
-        strategy_suffix = config.retrieval_strategy
-        if config.search_type != "similarity":
-            strategy_suffix += f"+{config.search_type}"
+        strategy_suffix = config.search_type
         if config.rerank:
             strategy_suffix += "+rerank"
         out_dir = Path(config.output_dir) / f"{dataset_name}_unified" / strategy_suffix / config.embed_model

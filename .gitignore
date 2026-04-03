@@ -28,6 +28,7 @@ outputs/
 *.faiss
 *.chroma/
 data/raw/
+data/unified_vqa.csv
 
 # Jupyter
 .ipynb_checkpoints/
@@ -35,3 +36,10 @@ data/raw/
 
 # Gemini agent (local only)
 .agents/
+
+# Ignored directories and files
+docs/
+eda/
+*.pdf
+*.pptx
+bash-scripts/

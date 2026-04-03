@@ -1,5 +1,10 @@
-"""Retrieval — separated from generation for batch processing."""
+"""Legacy retrieval helpers — kept for backward-compatible hybrid search.
 
+.. deprecated::
+    New retrieval strategies use the registry in ``rag_bench.retrievers``.
+    This module will be removed once the hybrid strategy is migrated to
+    ``rag_bench.retrievers.hybrid`` in Phase 3.
+"""
 from __future__ import annotations
 
 import time
@@ -18,38 +23,24 @@ class RetrievalResult:
     retrieval_ms: float
 
 
-def retrieve_context(
-    vectorstore: Chroma,
-    question: str,
-    k: int = 5,
-) -> RetrievalResult:
-    """Retrieve top-K relevant documents for a question."""
-    t0 = time.perf_counter()
-    docs = vectorstore.similarity_search(question, k=k)
-    retrieval_ms = (time.perf_counter() - t0) * 1000
-    return RetrievalResult(question=question, documents=docs, retrieval_ms=retrieval_ms)
-
-
-def batch_retrieve(
-    vectorstore: Chroma,
-    questions: list[str],
-    k: int = 5,
-) -> list[RetrievalResult]:
-    """Retrieve contexts for all questions (sequential)."""
-    return [retrieve_context(vectorstore, q, k) for q in questions]
-
-
 # ---------------------------------------------------------------------------
-# Hybrid Search helpers
+# Hybrid Search helpers (RRF — used by legacy 'hybrid' search_type)
 # ---------------------------------------------------------------------------
+
 
 def _reciprocal_rank_fusion(
     doc_lists: list[list[Document]], k_rrf: int = 60,
 ) -> list[Document]:
     """Merge multiple ranked doc lists using Reciprocal Rank Fusion (RRF).
 
-    RRF score = sum(1 / (k + rank)) for each list where doc appears.
-    Higher score = more relevant.
+    RRF score = sum(1 / (k + rank + 1)) for each list where doc appears.
+
+    Args:
+        doc_lists: Ordered lists of documents from different retrievers.
+        k_rrf: RRF constant (default 60 per the original paper).
+
+    Returns:
+        Merged, re-ranked list of documents.
     """
     scores: dict[str, float] = {}
     doc_map: dict[str, Document] = {}
@@ -65,104 +56,84 @@ def _reciprocal_rank_fusion(
     return [doc_map[k] for k in sorted_keys]
 
 
-def _search_dense(vectorstore: Chroma, query: str, k: int, search_type: str) -> list[Document]:
-    """Dense retrieval: similarity or MMR."""
-    if search_type == "mmr":
-        return vectorstore.max_marginal_relevance_search(query, k=k, fetch_k=k * 3)
-    return vectorstore.similarity_search(query, k=k)
-
-
 def _search_hybrid(
     vectorstore: Chroma,
     bm25_retriever,
     query: str,
     k: int,
 ) -> list[Document]:
-    """Hybrid search: BM25 (sparse) + Vector (dense) merged with RRF."""
+    """Hybrid search: BM25 (sparse) + Vector (dense) merged with RRF.
+
+    Args:
+        vectorstore: ChromaDB vector store.
+        bm25_retriever: LangChain BM25Retriever instance.
+        query: Search query.
+        k: Number of documents to return.
+
+    Returns:
+        Top-k documents merged via RRF.
+    """
     dense_docs = vectorstore.similarity_search(query, k=k)
     sparse_docs = bm25_retriever.invoke(query)[:k]
     return _reciprocal_rank_fusion([dense_docs, sparse_docs])[:k]
-
-
-# ---------------------------------------------------------------------------
-# Advanced retrieve (with transform, search_type, rerank)
-# ---------------------------------------------------------------------------
-
-def advanced_retrieve(
-    vectorstore: Chroma,
-    question: str,
-    k: int = 5,
-    transformer=None,
-    reranker=None,
-    rerank_factor: int = 3,
-    search_type: str = "similarity",
-    bm25_retriever=None,
-) -> RetrievalResult:
-    """Retrieve with optional query transformation, search type, and reranking.
-
-    Flow:
-        1. Transform: question -> [q1, q2, ...] via transformer
-        2. Retrieve: using search_type (similarity | mmr | hybrid)
-        3. Merge + dedup by page_content
-        4. (Optional) Rerank: re-score, keep top-k
-        5. Return top-k documents
-    """
-    t0 = time.perf_counter()
-
-    # 1. Transform query
-    queries = transformer.transform(question) if transformer else [question]
-    if transformer:
-        print(f"[Advanced Retrieve] Transformed query: {queries}")
-
-    # 2. Determine effective k (over-retrieve if reranking)
-    effective_k = k * rerank_factor if reranker else k
-
-    # 3. Retrieve for all queries
-    all_docs: list[Document] = []
-    for q in queries:
-        if search_type == "hybrid" and bm25_retriever is not None:
-            all_docs.extend(_search_hybrid(vectorstore, bm25_retriever, q, effective_k))
-        else:
-            all_docs.extend(_search_dense(vectorstore, q, effective_k, search_type))
-
-    # 4. Dedup by page_content
-    seen: set[str] = set()
-    unique_docs: list[Document] = []
-    for doc in all_docs:
-        if doc.page_content not in seen:
-            seen.add(doc.page_content)
-            unique_docs.append(doc)
-
-    # 5. Rerank if enabled
-    if reranker and len(unique_docs) > k:
-        doc_texts = [d.page_content for d in unique_docs]
-        rerank_results = reranker.rerank(question, doc_texts, top_n=k)
-        reranked_indices = [r.index for r in rerank_results]
-        unique_docs = [unique_docs[i] for i in reranked_indices]
-
-    retrieval_ms = (time.perf_counter() - t0) * 1000
-    return RetrievalResult(
-        question=question,
-        documents=unique_docs[:k],
-        retrieval_ms=retrieval_ms,
-    )
 
 
 def batch_advanced_retrieve(
     vectorstore: Chroma,
     questions: list[str],
     k: int = 5,
-    transformer=None,
     reranker=None,
     rerank_factor: int = 3,
-    search_type: str = "similarity",
+    search_type: str = "hybrid",
     bm25_retriever=None,
+    # Kept for backward compatibility — ignored
+    transformer=None,
 ) -> list[RetrievalResult]:
-    """Batch version of advanced_retrieve."""
-    return [
-        advanced_retrieve(
-            vectorstore, q, k, transformer, reranker, rerank_factor,
-            search_type, bm25_retriever,
+    """Batch retrieval for the legacy 'hybrid' search_type.
+
+    Retrieves using BM25+Dense RRF fusion, then optionally reranks.
+
+    Args:
+        vectorstore: ChromaDB vector store.
+        questions: List of query strings.
+        k: Number of documents to return per query.
+        reranker: Optional reranker instance.
+        rerank_factor: Over-retrieve k*factor before reranking.
+        search_type: Must be ``'hybrid'`` for this path.
+        bm25_retriever: LangChain BM25Retriever instance.
+        transformer: Ignored (kept for API compatibility).
+
+    Returns:
+        List of RetrievalResult, one per question.
+    """
+    results = []
+    for question in questions:
+        t0 = time.perf_counter()
+        effective_k = k * rerank_factor if reranker else k
+
+        docs = _search_hybrid(vectorstore, bm25_retriever, question, effective_k)
+
+        # Dedup by page_content
+        seen: set[str] = set()
+        unique: list[Document] = []
+        for doc in docs:
+            if doc.page_content not in seen:
+                seen.add(doc.page_content)
+                unique.append(doc)
+
+        # Optional reranking
+        if reranker and len(unique) > k:
+            doc_texts = [d.page_content for d in unique]
+            rerank_results = reranker.rerank(question, doc_texts, top_n=k)
+            reranked_indices = [r.index for r in rerank_results]
+            unique = [unique[i] for i in reranked_indices]
+
+        retrieval_ms = (time.perf_counter() - t0) * 1000
+        results.append(
+            RetrievalResult(
+                question=question,
+                documents=unique[:k],
+                retrieval_ms=retrieval_ms,
+            )
         )
-        for q in questions
-    ]
+    return results

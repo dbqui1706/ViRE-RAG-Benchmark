@@ -91,28 +91,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--judge-model", default="",
         help="Model name for LLM-as-Judge (required with --eval-faithfulness)",
     )
-    # Advanced retrieval options
-    parser.add_argument(
-        "--retrieval-strategy", default="baseline",
-        help="Query transform strategy: baseline, multi_query (default: baseline)",
-    )
-    parser.add_argument(
-        "--rerank", action="store_true",
-        help="Enable reranking with FPT bge-reranker-v2-m3",
-    )
-    parser.add_argument(
-        "--transform-llm", default="",
-        help="Model name for query transform LLM (default: from TRANSFORM_LLM_MODEL env)",
-    )
+    # Retrieval options
     parser.add_argument(
         "--search-type", default="similarity",
         choices=["similarity", "mmr", "hybrid", "bm25_syl", "bm25_word"],
         help=(
-            "Search method: similarity (dense), mmr (diverse dense), "
-            "hybrid (BM25+dense with RRF), "
-            "bm25_syl (sparse syllable-level), "
-            "bm25_word (sparse word-level via underthesea)"
+            "Retrieval method: similarity (dense), mmr (diverse dense), "
+            "hybrid (BM25+dense RRF), bm25_syl (sparse syllable), "
+            "bm25_word (sparse word via underthesea)"
         ),
+    )
+    parser.add_argument(
+        "--rerank", action="store_true",
+        help="Enable cross-encoder reranking (FPT bge-reranker-v2-m3) post-retrieval",
     )
     return parser.parse_args(argv)
 
@@ -159,9 +150,7 @@ def main(argv: list[str] | None = None) -> None:
                 include_semantic=args.semantic,
                 eval_faithfulness=args.eval_faithfulness,
                 judge_model=args.judge_model,
-                retrieval_strategy=args.retrieval_strategy,
                 rerank=args.rerank,
-                transform_llm_model=args.transform_llm,
                 search_type=args.search_type,
             )
             run_unified_pipeline(config, dataset_paths)
@@ -193,9 +182,7 @@ def main(argv: list[str] | None = None) -> None:
             include_semantic=args.semantic,
             eval_faithfulness=args.eval_faithfulness,
             judge_model=args.judge_model,
-            retrieval_strategy=args.retrieval_strategy,
             rerank=args.rerank,
-            transform_llm_model=args.transform_llm,
             search_type=args.search_type,
         )
         run_pipeline(config)
