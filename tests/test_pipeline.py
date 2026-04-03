@@ -32,13 +32,13 @@ def test_pipeline_with_mock(sample_csv, tmp_path):
         mock_prompt = MagicMock()
         mock_prompt.__or__ = MagicMock(return_value=mock_chain)
         mock_build.return_value = mock_prompt
-        from rag_bench.generator import FPTGenerator
-        gen = FPTGenerator(
+        from rag_bench.generator import OpenAIGenerator
+        gen = OpenAIGenerator(
             model="test", api_key="fake", base_url="https://fake.api"
         )
         gen.chain = mock_chain
 
-        with patch("rag_bench.pipeline.FPTGenerator", return_value=gen):
+        with patch("rag_bench.pipeline.OpenAIGenerator", return_value=gen):
             results = run_pipeline(config)
 
     assert results["config"]["dataset"] == "test_dataset"
@@ -56,6 +56,6 @@ def test_pipeline_with_mock(sample_csv, tmp_path):
     # Per-query
     assert len(results["per_query"]) == 5
     # Verify output files
-    out_dir = tmp_path / "output" / "test_dataset" / "bge-small-en-v1.5"
+    out_dir = tmp_path / "output" / "test_dataset" / "similarity" / "bge-small-en-v1.5"
     assert (out_dir / "report.md").exists()
     assert (out_dir / "metrics_summary.json").exists()

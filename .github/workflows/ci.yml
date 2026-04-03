@@ -29,7 +29,9 @@ jobs:
           restore-keys: ${{ runner.os }}-pip-
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: |
+          pip install -e ".[dev,vietnamese]"
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run linting
         run: |

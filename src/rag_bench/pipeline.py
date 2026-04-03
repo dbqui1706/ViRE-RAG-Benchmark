@@ -14,7 +14,7 @@ from .chunker import get_chunker
 from .config import RagConfig
 from .data_loader import load_dataset, sample_qa_pairs, split_few_shot_examples
 from .embeddings.registry import get_embed_model
-from .evaluator import evaluate_answer, evaluate_retrieval, run_ragas_evaluation
+from .evaluator import evaluate_answer, evaluate_retrieval
 from .generator import OpenAIGenerator
 from .indexer import UNIFIED_DATASET_NAME, build_vectorstore
 from .reporter import save_results
@@ -165,6 +165,7 @@ def _evaluate(config: RagConfig, generations: list[dict],
             for g in generations
         ]
         ragas_client = AsyncOpenAI(api_key=config.llm_api_key)
+        from .evaluator import run_ragas_evaluation
         ragas_metrics = asyncio.run(run_ragas_evaluation(
             ragas_data, model="gpt-4o-mini", client=ragas_client,
         ))

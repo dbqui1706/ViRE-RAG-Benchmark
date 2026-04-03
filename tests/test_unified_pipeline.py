@@ -1,4 +1,4 @@
-﻿"""Smoke test for unified index pipeline."""
+"""Smoke test for unified index pipeline."""
 
 from __future__ import annotations
 
@@ -83,9 +83,9 @@ def test_unified_pipeline_runs(tiny_csvs, tmp_path):
 
     # Output files exist
     out = tmp_path / "outputs"
-    assert (out / "DatasetA_unified" / "bge-small-en-v1.5" / "evaluations.json").exists()
-    assert (out / "DatasetA_unified" / "bge-small-en-v1.5" / "generations.json").exists()
-    assert (out / "DatasetB_unified" / "bge-small-en-v1.5" / "evaluations.json").exists()
+    assert (out / "DatasetA" / "similarity" / "bge-small-en-v1.5" / "evaluations.json").exists()
+    assert (out / "DatasetA" / "similarity" / "bge-small-en-v1.5" / "generations.json").exists()
+    assert (out / "DatasetB" / "similarity" / "bge-small-en-v1.5" / "evaluations.json").exists()
 
 
 def test_unified_pipeline_requires_unified_index_csv():
