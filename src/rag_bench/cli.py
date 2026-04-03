@@ -106,8 +106,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--search-type", default="similarity",
-        choices=["similarity", "mmr", "hybrid"],
-        help="Search method: similarity (dense), mmr (diverse), hybrid (BM25+dense with RRF)",
+        choices=["similarity", "mmr", "hybrid", "bm25_syl", "bm25_word"],
+        help=(
+            "Search method: similarity (dense), mmr (diverse dense), "
+            "hybrid (BM25+dense with RRF), "
+            "bm25_syl (sparse syllable-level), "
+            "bm25_word (sparse word-level via underthesea)"
+        ),
     )
     return parser.parse_args(argv)
 
