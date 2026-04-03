@@ -91,3 +91,17 @@ def test_build_retriever_unknown_raises(tmp_path, sample_csv):
     cfg = _base_config(tmp_path, sample_csv, search_type="does_not_exist")
     with pytest.raises(ValueError, match="Unknown search_type"):
         _build_retriever(cfg, vectorstore=MagicMock(), docs=[])
+
+
+def test_build_retriever_hybrid(tmp_path, sample_csv):
+    """search_type='hybrid' should return a HybridRetriever."""
+    import rag_bench.retrievers.hybrid  # noqa: F401
+    from rag_bench.pipeline import _build_retriever
+    from rag_bench.retrievers.hybrid import HybridRetriever
+
+    docs = [Document(page_content="test document", metadata={})]
+    cfg = _base_config(tmp_path, sample_csv, search_type="hybrid")
+    retriever = _build_retriever(cfg, vectorstore=MagicMock(), docs=docs)
+
+    assert isinstance(retriever, HybridRetriever)
+
