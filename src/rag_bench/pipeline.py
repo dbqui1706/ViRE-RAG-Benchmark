@@ -272,6 +272,7 @@ def _build_index(config: RagConfig, csv_path: str, dataset_name: str):
     print(f"  Chunking ({config.chunk_strategy}): {len(all_docs)} → {len(docs)} chunks")
 
     embed_model = get_embed_model(config.embed_model)
+    print(f"  Building vectorstore with {config.embed_model} for {dataset_name}")
     vectorstore = build_vectorstore(docs, embed_model, config, dataset_name, config.embed_model)
     return vectorstore, docs
 
@@ -350,7 +351,7 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
     all_results = []
     for csv_path in dataset_csv_paths:
         dataset_name = Path(csv_path).stem
-        out_dir = _output_dir(config, dataset_name, suffix="_unified")
+        out_dir = _output_dir(config, dataset_name)
         print(f"[Unified] ── {dataset_name} ──")
 
         qa_pairs, few_shot = _prepare_qa(config, csv_path)
@@ -358,6 +359,7 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
 
         # Retrieve + Generate
         questions = [qa["question"] for qa in qa_pairs]
+        print(f"  Retrieving {len(questions)}/{dataset_name} queries ({config.search_type})...")
         retrieval_results = retriever.batch_retrieve(questions)
         gen_results = _generate(config, retrieval_results, few_shot)
 

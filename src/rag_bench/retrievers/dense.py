@@ -41,7 +41,7 @@ class DenseRetriever(BaseRetriever):
         top_k: int = 5,
         search_type: str = "similarity",
     ) -> None:
-        self._vs = vectorstore
+        self._vectorstore = vectorstore
         self._top_k = top_k
         self._search_type = search_type
 
@@ -59,9 +59,9 @@ class DenseRetriever(BaseRetriever):
             ValueError: If ``search_type`` is not ``'similarity'`` or ``'mmr'``.
         """
         if self._search_type == "similarity":
-            return self._vs.similarity_search(query, k=self._top_k)
+            return self._vectorstore.similarity_search(query, k=self._top_k)
         if self._search_type == "mmr":
-            return self._vs.max_marginal_relevance_search(
+            return self._vectorstore.max_marginal_relevance_search(
                 query, k=self._top_k, fetch_k=self._top_k * 3
             )
         raise ValueError(
@@ -92,8 +92,8 @@ class DenseRetriever(BaseRetriever):
             # MMR requires LangChain's special logic — use sequential fallback
             return super().batch_retrieve(queries, **kwargs)
 
-        collection = self._vs._collection  # native chromadb.Collection
-        embed_fn = self._vs._embedding_function  # same model used to build index
+        collection = self._vectorstore._collection  # native chromadb.Collection
+        embed_fn = self._vectorstore._embedding_function  # same model used to build index
 
         t0 = time.perf_counter()
         query_embeddings = embed_fn.embed_documents(queries)
