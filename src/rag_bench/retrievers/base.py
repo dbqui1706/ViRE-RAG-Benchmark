@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from langchain_core.documents import Document
+from tqdm import tqdm
 
 
 @dataclass
@@ -66,7 +67,7 @@ class BaseRetriever(ABC):
             A list of ``RetrievalResult``, one per query.
         """
         results: list[RetrievalResult] = []
-        for q in queries:
+        for q in tqdm(queries, desc="Retrieving"):
             t0 = time.perf_counter()
             docs = self.retrieve(q, **kwargs)
             ms = (time.perf_counter() - t0) * 1000

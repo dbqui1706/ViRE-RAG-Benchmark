@@ -8,17 +8,20 @@ Provides two retriever variants registered under the keys:
   Handles Vietnamese compound words (e.g. ``"thủ tục"`` → ``"thủ_tục"``),
   improving sparse retrieval quality for legal and medical domains.
 
-Both variants use ``rank_bm25.BM25Okapi`` under the hood and are built from
+Both variants use ``bm25s`` under the hood and are built from
 a list of ``langchain_core.documents.Document`` objects at construction time.
 """
 from __future__ import annotations
 
+import time
+from tqdm import tqdm
+
 from langchain_core.documents import Document
-from rank_bm25 import BM25Okapi
+import bm25s
 from underthesea import word_tokenize
 
 from . import register
-from .base import BaseRetriever
+from .base import BaseRetriever, RetrievalResult
 
 # ---------------------------------------------------------------------------
 # Tokenizers (module-level, easy to mock in tests)
@@ -58,7 +61,7 @@ def _tokenize_word(text: str) -> list[str]:
 
 
 class _BM25BaseRetriever(BaseRetriever):
-    """Internal base class for BM25 variants.
+    """Internal base class for BM25 variants using bm25s.
 
     Subclasses only need to define ``_tokenize``.
     """
@@ -71,19 +74,27 @@ class _BM25BaseRetriever(BaseRetriever):
     def _tokenize(self, text: str) -> list[str]:
         raise NotImplementedError
 
-    def _build_index(self, documents: list[Document]) -> BM25Okapi | None:
+    def _build_index(self, documents: list[Document]) -> bm25s.BM25 | None:
         """Build the BM25 index from document page content.
 
         Args:
             documents: Corpus documents.
 
         Returns:
-            A ``BM25Okapi`` index, or ``None`` if the corpus is empty.
+            A ``bm25s.BM25`` index, or ``None`` if the corpus is empty.
         """
         if not documents:
             return None
-        corpus = [self._tokenize(doc.page_content) for doc in documents]
-        return BM25Okapi(corpus)
+            
+        corpus_tokens = [
+            self._tokenize(doc.page_content) 
+            for doc in tqdm(documents, desc="Tokenizing BM25 corpus")
+        ]
+        
+        # bm25s optimizes indexing in C/NumPy
+        retriever = bm25s.BM25()
+        retriever.index(corpus_tokens)
+        return retriever
 
     def retrieve(self, query: str, **kwargs) -> list[Document]:
         """Retrieve top-k documents using BM25 scoring.
@@ -99,13 +110,48 @@ class _BM25BaseRetriever(BaseRetriever):
             return []
 
         tokenized_query = self._tokenize(query)
-        scores = self._index.get_scores(tokenized_query)
+        k = min(self._top_k, len(self._documents))
+        
+        # bm25s.retrieve expects a list of queries (so we wrap in list)
+        results, scores = self._index.retrieve([tokenized_query], corpus=self._documents, k=k)
+        
+        # results[0] contains the Document objects for the first (and only) query
+        return list(results[0])
 
-        # Pair each doc with its score, sort descending, take top_k
-        ranked = sorted(
-            zip(scores, self._documents, strict=False), key=lambda x: x[0], reverse=True
-        )
-        return [doc for _, doc in ranked[: self._top_k]]
+    def batch_retrieve(self, queries: list[str], **kwargs) -> list[RetrievalResult]:
+        """Retrieve documents for multiple queries simultaneously.
+        
+        Leverages bm25s optimized C/NumPy vectorized retrieval.
+        
+        Args:
+            queries: List of search query strings.
+            **kwargs: Ignored.
+            
+        Returns:
+            A list of ``RetrievalResult``, one per query.
+        """
+        if self._index is None or not self._documents:
+            return [RetrievalResult(question=q, documents=[], retrieval_ms=0.0) for q in queries]
+            
+        k = min(self._top_k, len(self._documents))
+        
+        t0 = time.perf_counter()
+        
+        # Tokenize all queries
+        tokenized_queries = [self._tokenize(q) for q in queries]
+        
+        # Vectorized batch retrieval
+        results, scores = self._index.retrieve(tokenized_queries, corpus=self._documents, k=k)
+        
+        ms = (time.perf_counter() - t0) * 1000
+        ms_per_query = ms / len(queries)
+        
+        ret_results = []
+        for i, q in enumerate(queries):
+            docs = list(results[i])
+            ret_results.append(RetrievalResult(question=q, documents=docs, retrieval_ms=ms_per_query))
+            
+        return ret_results
 
 
 # ---------------------------------------------------------------------------
