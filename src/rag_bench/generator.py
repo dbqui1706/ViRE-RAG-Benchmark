@@ -162,6 +162,7 @@ class OpenAIGenerator:
         t0 = time.perf_counter()
         responses = self.chain.batch(
             inputs,
+            return_exceptions=True,
             config={
                 "max_concurrency": max_workers,
                 "callbacks": [cb],
@@ -174,8 +175,15 @@ class OpenAIGenerator:
         results = []
         for i, r in enumerate(responses):
             tokens = cb.token_usage[i] if i < len(cb.token_usage) else {}
+            
+            if isinstance(r, Exception):
+                print(f"Warning: Exception at item {i} - {str(r)}")
+                text = ""
+            else:
+                text = self._clean(r)
+                
             results.append(GenerationResult(
-                text=self._clean(r),
+                text=text,
                 generation_ms=avg_ms,
                 input_tokens=tokens.get("input_tokens", 0),
                 output_tokens=tokens.get("output_tokens", 0),
