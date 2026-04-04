@@ -13,7 +13,11 @@ a list of ``langchain_core.documents.Document`` objects at construction time.
 """
 from __future__ import annotations
 
+import hashlib
+import pickle
 import time
+from pathlib import Path
+
 from tqdm import tqdm
 
 from langchain_core.documents import Document
@@ -71,7 +75,12 @@ class _BM25BaseRetriever(BaseRetriever):
         self._top_k = top_k
         self._index = self._build_index(documents)
 
-    def _tokenize(self, text: str) -> list[str]:
+    @property
+    def _tokenizer_func(self):
+        """Return the module-level tokenization callable.
+        
+        This avoids pickling issues when using multiprocessing.
+        """
         raise NotImplementedError
 
     def _build_index(self, documents: list[Document]) -> bm25s.BM25 | None:
@@ -86,10 +95,32 @@ class _BM25BaseRetriever(BaseRetriever):
         if not documents:
             return None
             
-        corpus_tokens = [
-            self._tokenize(doc.page_content) 
-            for doc in tqdm(documents, desc="Tokenizing BM25 corpus")
-        ]
+        cache_dir = Path("outputs/.bm25_cache")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create a proxy hash for the corpus to use as a cache key
+        md5 = hashlib.md5()
+        for doc in documents:
+            md5.update(doc.page_content.encode('utf-8'))
+        corpus_hash = md5.hexdigest()
+        
+        strategy = self.__class__.__name__
+        cache_file = cache_dir / f"{strategy}_{corpus_hash}.pkl"
+        
+        if cache_file.exists():
+            print(f"  [Cache] Loading cached BM25 tokenized corpus from {cache_file.name}")
+            with open(cache_file, "rb") as f:
+                corpus_tokens = pickle.load(f)
+        else:
+            tokenizer_func = self._tokenizer_func
+            
+            corpus_tokens = [
+                tokenizer_func(doc.page_content) 
+                for doc in tqdm(documents, desc=f"Tokenizing BM25 corpus ({strategy})")
+            ]
+                
+            with open(cache_file, "wb") as f:
+                pickle.dump(corpus_tokens, f)
         
         # bm25s optimizes indexing in C/NumPy
         retriever = bm25s.BM25()
@@ -109,7 +140,7 @@ class _BM25BaseRetriever(BaseRetriever):
         if self._index is None or not self._documents:
             return []
 
-        tokenized_query = self._tokenize(query)
+        tokenized_query = self._tokenizer_func(query)
         k = min(self._top_k, len(self._documents))
         
         # bm25s.retrieve expects a list of queries (so we wrap in list)
@@ -138,7 +169,8 @@ class _BM25BaseRetriever(BaseRetriever):
         t0 = time.perf_counter()
         
         # Tokenize all queries
-        tokenized_queries = [self._tokenize(q) for q in queries]
+        tokenizer_func = self._tokenizer_func
+        tokenized_queries = [tokenizer_func(q) for q in queries]
         
         # Vectorized batch retrieval
         results, scores = self._index.retrieve(tokenized_queries, corpus=self._documents, k=k)
@@ -174,8 +206,9 @@ class BM25SylRetriever(_BM25BaseRetriever):
         >>> results = r.retrieve("thủ tục hành chính")
     """
 
-    def _tokenize(self, text: str) -> list[str]:
-        return _tokenize_syllable(text)
+    @property
+    def _tokenizer_func(self):
+        return _tokenize_syllable
 
 
 @register("bm25_word")
@@ -195,5 +228,6 @@ class BM25WordRetriever(_BM25BaseRetriever):
         >>> results = r.retrieve("thủ tục hành chính")
     """
 
-    def _tokenize(self, text: str) -> list[str]:
-        return _tokenize_word(text)
+    @property
+    def _tokenizer_func(self):
+        return _tokenize_word
