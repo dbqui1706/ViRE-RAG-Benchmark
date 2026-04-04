@@ -43,3 +43,7 @@ eda/
 *.pdf
 *.pptx
 bash-scripts/
+
+# Transient
+ruff_errors.txt
+run.txt

@@ -1,4 +1,0 @@
-﻿src\rag_bench\embeddings\registry.py:45:19: RUF100 [*] Unused `noqa` directive (unused: `E402`)
-tests\test_evaluator.py:114:5: F841 Local variable `ragas` is assigned to but never used
-Found 2 errors.
-[*] 1 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
