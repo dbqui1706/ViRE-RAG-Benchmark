@@ -39,6 +39,7 @@ data/unified_vqa.csv
 
 # Ignored directories and files
 docs/
+!docs/superpowers/
 eda/
 *.pdf
 *.pptx
@@ -47,3 +48,6 @@ bash-scripts/
 # Transient
 ruff_errors.txt
 run.txt
+
+# Temporary file
+temp_*.py
