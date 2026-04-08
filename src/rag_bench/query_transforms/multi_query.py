@@ -11,8 +11,10 @@ import os
 def _factory(**kwargs) -> MultiQueryTransformer:
     # Use config overrides or defaults
     llm_model = kwargs.get("llm_model", "gpt-4o-mini")
-    base_url = kwargs.get("base_url") or os.environ.get("LLM_BASE_URL", "https://mkp-api.fptcloud.com")
-    api_key = kwargs.get("api_key") or os.environ.get("FPT_API_KEY", "")
+    base_url = os.environ.get("FPT_BASE_URL") or os.environ.get("LLM_BASE_URL", "https://mkp-api.fptcloud.com")
+    
+    # Priority: FPT_API_KEY (direct from env) > api_key (from kwargs)
+    api_key = os.environ.get("FPT_API_KEY") or kwargs.get("api_key", "")
     n_variations = kwargs.get("n_variations", 3)
     
     if not api_key:
