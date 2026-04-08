@@ -17,6 +17,7 @@ from .embeddings.registry import get_embed_model
 from .evaluator import evaluate_answer, evaluate_retrieval
 from .generator import OpenAIGenerator
 from .indexer import UNIFIED_DATASET_NAME, build_vectorstore
+from .query_transforms import get_transformer
 from .reporter import save_results
 from .reranker import FPTReranker
 from .retrievers import RetrievalResult, get_retriever, list_strategies
@@ -43,13 +44,28 @@ def _build_retriever(config: RagConfig, vectorstore, docs: list):
     st = config.search_type
 
     if st in ("similarity", "mmr"):
-        return get_retriever("dense", vectorstore=vectorstore, top_k=config.top_k, search_type=st)
-    if st in ("bm25_syl", "bm25_word"):
-        return get_retriever(st, documents=docs, top_k=config.top_k)
-    if st == "hybrid":
-        return get_retriever("hybrid", vectorstore=vectorstore, documents=docs, top_k=config.top_k)
+        base_retriever = get_retriever("dense", vectorstore=vectorstore, top_k=config.top_k, search_type=st)
+    elif st in ("bm25_syl", "bm25_word"):
+        base_retriever = get_retriever(st, documents=docs, top_k=config.top_k)
+    elif st == "hybrid":
+        base_retriever = get_retriever("hybrid", vectorstore=vectorstore, documents=docs, top_k=config.top_k)
+    else:
+        raise ValueError(f"Unknown search_type: '{st}'. Available: {list_strategies()}")
 
-    raise ValueError(f"Unknown search_type: '{st}'. Available: {list_strategies()}")
+    if config.query_transform != "passthrough":
+        transformer = get_transformer(
+            config.query_transform,
+            llm_model=config.transform_llm_model,
+            base_url=config.llm_base_url,
+            n_variations=config.n_query_variations
+        )
+        return get_retriever(
+            "expanded",
+            base_retriever=base_retriever,
+            transformer=transformer,
+            top_k=config.top_k
+        )
+    return base_retriever
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +222,9 @@ def _save_evaluations(config: RagConfig, metrics: dict, out_dir: Path,
             "dataset": dataset_name,
             "index_source": index_source,
             "search_type": config.search_type,
+            "query_transform": config.query_transform,
+            "transform_llm_model": config.transform_llm_model,
+            "n_query_variations": config.n_query_variations,
             "embed_model": config.embed_model,
             "llm_model": config.llm_model,
             "chunk_strategy": config.chunk_strategy,

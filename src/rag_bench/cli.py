@@ -90,6 +90,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--judge-model", default="",
         help="Model name for LLM-as-Judge (required with --eval-faithfulness)",
     )
+    # Query Expansion options
+    parser.add_argument(
+        "--query-transform", type=str, default="passthrough",
+        help="passthrough | multi_query | hyde",
+    )
+    parser.add_argument(
+        "--transform-llm-model", type=str, default="gpt-4o-mini",
+        help="LLM for query transforms",
+    )
+    parser.add_argument(
+        "--n-query-variations", type=int, default=3,
+        help="Number of variations for multi_query",
+    )
     # Retrieval options
     parser.add_argument(
         "--search-type", default="similarity",
@@ -149,6 +162,9 @@ def main(argv: list[str] | None = None) -> None:
                 include_semantic=args.semantic,
                 eval_faithfulness=args.eval_faithfulness,
                 judge_model=args.judge_model,
+                query_transform=args.query_transform,
+                transform_llm_model=args.transform_llm_model,
+                n_query_variations=args.n_query_variations,
                 rerank=args.rerank,
                 search_type=args.search_type,
             )
@@ -181,6 +197,9 @@ def main(argv: list[str] | None = None) -> None:
             include_semantic=args.semantic,
             eval_faithfulness=args.eval_faithfulness,
             judge_model=args.judge_model,
+            query_transform=args.query_transform,
+            transform_llm_model=args.transform_llm_model,
+            n_query_variations=args.n_query_variations,
             rerank=args.rerank,
             search_type=args.search_type,
         )

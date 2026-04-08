@@ -32,6 +32,10 @@ class RagConfig:
     # Prompt strategy
     prompt_strategy: str = "zero_shot"  # "zero_shot" or "few_shot"
     n_few_shot: int = 3  # Number of few-shot examples (auto-selected from dataset)
+    # Query Expansion
+    query_transform: str = "passthrough"
+    transform_llm_model: str = "gpt-4o-mini"
+    n_query_variations: int = 3
     # Evaluation options
     include_semantic: bool = False
     eval_faithfulness: bool = False

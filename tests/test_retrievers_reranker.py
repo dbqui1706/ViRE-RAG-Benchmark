@@ -5,6 +5,9 @@ from rag_bench.retrievers.reranker import RerankRetriever
 from rag_bench.retrievers.base import BaseRetriever
 
 class MockBaseRetriever(BaseRetriever):
+    def __init__(self):
+        self._top_k = 5
+        
     def retrieve(self, query: str, **kwargs):
         return [
             Document(page_content="Bad doc"),
