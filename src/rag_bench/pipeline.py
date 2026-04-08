@@ -57,6 +57,7 @@ def _build_retriever(config: RagConfig, vectorstore, docs: list):
             config.query_transform,
             llm_model=config.transform_llm_model,
             base_url=config.llm_base_url,
+            api_key=config.llm_api_key,
             n_variations=config.n_query_variations
         )
         return get_retriever(
