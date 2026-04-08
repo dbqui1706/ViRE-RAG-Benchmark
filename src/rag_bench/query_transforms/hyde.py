@@ -8,8 +8,12 @@ import os
 @register("hyde")
 def _factory(**kwargs) -> HydeTransformer:
     llm_model = kwargs.get("llm_model", "gpt-4o-mini")
-    base_url = kwargs.get("base_url") or os.environ.get("LLM_BASE_URL", "")
+    base_url = kwargs.get("base_url") or os.environ.get("LLM_BASE_URL", "https://mkp-api.fptcloud.com")
     api_key = kwargs.get("api_key") or os.environ.get("FPT_API_KEY", "")
+    
+    if not api_key:
+        print("Warning: API Key is not set. Please set FPT_API_KEY environment variable.")
+        
     return HydeTransformer(llm_model=llm_model, base_url=base_url, api_key=api_key)
 
 class HydeTransformer(QueryTransformer):

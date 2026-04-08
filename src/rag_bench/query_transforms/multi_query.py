@@ -7,16 +7,17 @@ from tqdm import tqdm
 from dotenv import load_dotenv
 import os
 
-FPT_API_KEY = os.environ.get("FPT_API_KEY", "")
-FPT_BASE_URL = os.environ.get("LLM_BASE_URL", "")
-
 @register("multi_query")
 def _factory(**kwargs) -> MultiQueryTransformer:
     # Use config overrides or defaults
     llm_model = kwargs.get("llm_model", "gpt-4o-mini")
-    base_url = kwargs.get("base_url") or FPT_BASE_URL
-    api_key = kwargs.get("api_key") or FPT_API_KEY
+    base_url = kwargs.get("base_url") or os.environ.get("LLM_BASE_URL", "https://mkp-api.fptcloud.com")
+    api_key = kwargs.get("api_key") or os.environ.get("FPT_API_KEY", "")
     n_variations = kwargs.get("n_variations", 3)
+    
+    if not api_key:
+        print("Warning: API Key is not set. Please set FPT_API_KEY environment variable.")
+        
     return MultiQueryTransformer(llm_model=llm_model, base_url=base_url, api_key=api_key, n_variations=n_variations)
 
 
