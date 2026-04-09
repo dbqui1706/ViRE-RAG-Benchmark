@@ -6,8 +6,9 @@ Usage:
     python benchmark/chunking_benchmark.py --strategy sentence --datasets UIT-ViQuAD2 ViNewsQA
     python benchmark/chunking_benchmark.py --list
 """
-from yaml import warnings
+
 from __future__ import annotations
+from yaml import warnings
 
 import argparse
 import json
@@ -21,6 +22,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import warnings
+warnings.filterwarnings("ignore")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
