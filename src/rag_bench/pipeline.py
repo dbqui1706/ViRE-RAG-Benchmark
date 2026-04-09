@@ -75,6 +75,29 @@ def _build_retriever(config: RagConfig, vectorstore, docs: list):
             top_k=config.top_k,
         )
 
+    # Wrap with corrective if enabled
+    if config.corrective:
+        print("  CRAG: Corrective Retrieval filtering enabled")
+        base_retriever = get_retriever(
+            "corrective",
+            base_retriever=base_retriever,
+            model=config.transform_llm_model,  # reuse transform model (gpt-4o-mini usually)
+            api_key=config.llm_api_key,
+            top_k=config.top_k,
+        )
+
+    # Wrap with compressor if enabled
+    if config.compress:
+        print(f"  Compressor: Contextual Compression enabled (max_tokens={config.compress_max_tokens})")
+        base_retriever = get_retriever(
+            "compressor",
+            base_retriever=base_retriever,
+            model=config.transform_llm_model,
+            api_key=config.llm_api_key,
+            top_k=config.top_k,
+            compress_max_tokens=config.compress_max_tokens,
+        )
+
     return base_retriever
 
 
@@ -247,6 +270,9 @@ def _save_evaluations(config: RagConfig, metrics: dict, out_dir: Path,
             "max_workers": config.max_workers,
             "include_semantic": config.include_semantic,
             "eval_faithfulness": config.eval_faithfulness,
+            "rerank": config.rerank,
+            "corrective": config.corrective,
+            "compress": config.compress,
         },
         **metrics,
     }
@@ -319,6 +345,10 @@ def _output_dir(config: RagConfig, dataset_name: str, suffix: str = "") -> Path:
     strategy = config.search_type
     if config.rerank:
         strategy += "+rerank"
+    if config.corrective:
+        strategy += "+corrective"
+    if config.compress:
+        strategy += "+compress"
     out = Path(config.output_dir) / name / strategy / config.embed_model
     out.mkdir(parents=True, exist_ok=True)
     return out

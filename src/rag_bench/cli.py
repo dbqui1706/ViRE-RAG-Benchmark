@@ -119,6 +119,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--rerank", action="store_true",
         help="Enable cross-encoder reranking (FPT bge-reranker-v2-m3) post-retrieval",
     )
+    parser.add_argument(
+        "--corrective", action="store_true",
+        help="Enable Corrective RAG (CRAG) post-retrieval filtering",
+    )
+    parser.add_argument(
+        "--compress", action="store_true",
+        help="Enable Contextual Compression (A6) — LLM compresses each chunk to query-relevant content",
+    )
     return parser.parse_args(argv)
 
 
@@ -167,7 +175,10 @@ def main(argv: list[str] | None = None) -> None:
                 query_transform=args.query_transform,
                 transform_llm_model=args.transform_llm_model,
                 n_query_variations=args.n_query_variations,
+                max_sub_questions=args.max_sub_questions,
                 rerank=args.rerank,
+                corrective=args.corrective,
+                compress=args.compress,
                 search_type=args.search_type,
             )
             run_unified_pipeline(config, dataset_paths)
@@ -203,6 +214,8 @@ def main(argv: list[str] | None = None) -> None:
             transform_llm_model=args.transform_llm_model,
             n_query_variations=args.n_query_variations,
             rerank=args.rerank,
+            corrective=args.corrective,
+            compress=args.compress,
             search_type=args.search_type,
         )
         run_pipeline(config)

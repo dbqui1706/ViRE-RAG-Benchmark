@@ -40,6 +40,9 @@ class RagConfig:
     rerank: bool = False                       # Enable cross-encoder reranking post-retrieval
     rerank_model: str = "bge-reranker-v2-m3"
     rerank_factor: int = 3                     # Over-retrieve k*factor, rerank to k
+    corrective: bool = False                   # Enable Corrective RAG (CRAG) filtering
+    compress: bool = False                     # Enable Contextual Compression post-retrieval
+    compress_max_tokens: int = 128             # Max tokens for compression LLM output
     search_type: str = "similarity"            # similarity | mmr | hybrid | bm25_syl | bm25_word
     query_transform: str = "passthrough"
     transform_llm_model: str = "gpt-4o-mini"

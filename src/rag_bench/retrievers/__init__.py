@@ -78,5 +78,7 @@ from . import hybrid as _hybrid
 from . import hybrid_weighted as _hybrid_weighted
 from . import expanded as _expanded
 from . import reranker as _reranker
+from . import corrective as _corrective
+from . import compressor as _compressor
 
 __all__ = ["BaseRetriever", "RetrievalResult", "get_retriever", "list_strategies", "register"]
