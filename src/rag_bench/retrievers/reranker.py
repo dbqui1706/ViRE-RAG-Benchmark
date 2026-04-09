@@ -19,11 +19,13 @@ class RerankRetriever(BaseRetriever):
 
     Args:
         base_retriever: A BaseRetriever instance for the first stage.
+            Over-retrieval (top_m) is controlled by the pipeline at
+            construction time — the base retriever is already built
+            with the inflated top_k.
         api_key: The API Key for the Rerank API.
         base_url: The Base URL for the Rerank service.
         model: Reranker model endpoint identifier.
-        top_m: Number of documents to fetch in Stage 1. Default 50.
-        top_k: Number of documents to return in Stage 2. Default 5.
+        top_k: Number of documents to return after reranking. Default 5.
     """
 
     def __init__(
@@ -32,17 +34,11 @@ class RerankRetriever(BaseRetriever):
         api_key: str,
         base_url: str = "https://mkp-api.fptcloud.com",
         model: str = "bge-reranker-v2-m3",
-        top_m: int = 50,
         top_k: int = 5,
+        **kwargs,
     ) -> None:
         self.base_retriever = base_retriever
-        
-        # Override the base_retriever's top_k to match top_m safely
-        if hasattr(self.base_retriever, '_top_k'):
-            self.base_retriever._top_k = top_m
-
         self.rerank_client = FPTReranker(api_key=api_key, base_url=base_url, model=model)
-        self.top_m = top_m
         self._top_k = top_k
 
     def retrieve(self, query: str, **kwargs) -> list[Document]:

@@ -19,7 +19,6 @@ from .generator import OpenAIGenerator
 from .indexer import UNIFIED_DATASET_NAME, build_vectorstore
 from .query_transforms import get_transformer
 from .reporter import save_results
-from .reranker import FPTReranker
 from .retrievers import RetrievalResult, get_retriever, list_strategies
 
 # ---------------------------------------------------------------------------
@@ -27,31 +26,27 @@ from .retrievers import RetrievalResult, get_retriever, list_strategies
 # ---------------------------------------------------------------------------
 
 
-def _build_reranker(config: RagConfig):
-    """Build cross-encoder reranker if enabled."""
-    if not config.rerank:
-        return None
-    reranker = FPTReranker(
-        api_key=os.environ.get("FPT_API_KEY", ""),
-        model=config.rerank_model,
-    )
-    print(f"  Reranker: {config.rerank_model}")
-    return reranker
-
-
 def _build_retriever(config: RagConfig, vectorstore, docs: list):
-    """Instantiate retriever via the registry based on ``config.search_type``."""
+    """Instantiate retriever via the registry based on ``config.search_type``.
+
+    Supports optional two-stage reranking: when ``config.rerank`` is True,
+    stage 1 over-retrieves by ``rerank_factor`` and stage 2 reranks to ``top_k``.
+    """
     st = config.search_type
 
+    # When reranking, stage-1 retrieves more candidates for the reranker
+    stage1_k = config.top_k * config.rerank_factor if config.rerank else config.top_k
+
     if st in ("similarity", "mmr"):
-        base_retriever = get_retriever("dense", vectorstore=vectorstore, top_k=config.top_k, search_type=st)
+        base_retriever = get_retriever("dense", vectorstore=vectorstore, top_k=stage1_k, search_type=st)
     elif st in ("bm25_syl", "bm25_word"):
-        base_retriever = get_retriever(st, documents=docs, top_k=config.top_k)
+        base_retriever = get_retriever(st, documents=docs, top_k=stage1_k)
     elif st == "hybrid":
-        base_retriever = get_retriever("hybrid", vectorstore=vectorstore, documents=docs, top_k=config.top_k)
+        base_retriever = get_retriever("hybrid", vectorstore=vectorstore, documents=docs, top_k=stage1_k)
     else:
         raise ValueError(f"Unknown search_type: '{st}'. Available: {list_strategies()}")
 
+    # Wrap with query expansion if active
     if config.query_transform != "passthrough":
         transformer = get_transformer(
             config.query_transform,
@@ -60,12 +55,25 @@ def _build_retriever(config: RagConfig, vectorstore, docs: list):
             api_key=config.llm_api_key,
             n_variations=config.n_query_variations
         )
-        return get_retriever(
+        base_retriever = get_retriever(
             "expanded",
             base_retriever=base_retriever,
             transformer=transformer,
-            top_k=config.top_k
+            top_k=stage1_k,
         )
+
+    # Wrap with reranker if enabled
+    if config.rerank:
+        print(f"  Reranker: {config.rerank_model} (top_m={stage1_k} -> top_k={config.top_k})")
+        base_retriever = get_retriever(
+            "reranker",
+            base_retriever=base_retriever,
+            api_key=os.environ.get("FPT_API_KEY", ""),
+            model=config.rerank_model,
+            top_m=stage1_k,
+            top_k=config.top_k,
+        )
+
     return base_retriever
 
 
@@ -201,7 +209,11 @@ def _evaluate(config: RagConfig, generations: list[dict],
         "generation_metrics": {k: _avg(k, "generation_scores") for k in gen_keys},
         "retrieval_metrics": {
             k: _avg(k, "retrieval_scores")
-            for k in ["context_precision", "context_recall", "mrr", "hit_rate"]
+            for k in [
+                "context_precision", "context_recall", "mrr", "hit_rate",
+                "recall_at_1", "recall_at_3", "recall_at_5", "recall_at_10",
+                "ndcg_at_1", "ndcg_at_3", "ndcg_at_5", "ndcg_at_10",
+            ]
         },
         "ragas_metrics": ragas_metrics,
         "latency": {
@@ -260,7 +272,8 @@ def _print_summary(metrics: dict):
     print(
         f"  Ret: P={_fmt(rm.get('context_precision'))}  "
         f"R={_fmt(rm.get('context_recall'))}  "
-        f"MRR={_fmt(rm.get('mrr'))}  Hit={_fmt(rm.get('hit_rate'))}"
+        f"MRR={_fmt(rm.get('mrr'))}  Hit={_fmt(rm.get('hit_rate'))}  "
+        f"R@5={_fmt(rm.get('recall_at_5'))}  NDCG@5={_fmt(rm.get('ndcg_at_5'))}"
     )
     print(f"  Latency: {lat['mean_total_ms']:.0f}ms avg")
 

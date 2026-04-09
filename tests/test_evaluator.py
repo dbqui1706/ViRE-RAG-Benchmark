@@ -107,6 +107,74 @@ def test_evaluate_retrieval_no_match():
     assert result["hit_rate"] == 0.0
 
 
+# === Section 2b: Multi-K Retrieval Metrics (Recall@K, NDCG@K) ===
+
+
+def test_recall_at_k_values():
+    """Recall@K at multiple K values — match at position 2."""
+    docs = [
+        Document(page_content="irrelevant text about dogs"),
+        Document(page_content="the cat sat on the mat nicely"),
+        Document(page_content="another irrelevant document"),
+    ]
+    gold = "the cat sat on the mat"
+    result = evaluate_retrieval(docs, gold, k=5)
+
+    assert result["recall_at_1"] == 0.0   # not in top-1
+    assert result["recall_at_3"] == 1.0   # found in top-3
+    assert result["recall_at_5"] == 1.0   # found in top-5
+    assert result["recall_at_10"] == 1.0  # found in top-10
+
+
+def test_ndcg_at_k_values():
+    """NDCG@K — match at position 2 gives partial score."""
+    docs = [
+        Document(page_content="irrelevant text about dogs"),
+        Document(page_content="the cat sat on the mat nicely"),
+        Document(page_content="another irrelevant document"),
+    ]
+    gold = "the cat sat on the mat"
+    result = evaluate_retrieval(docs, gold, k=5)
+
+    # NDCG@1: no match at pos 1 → 0.0
+    assert result["ndcg_at_1"] == 0.0
+
+    # NDCG@3: DCG = 1/log2(3) ≈ 0.6309, IDCG = 1.0 → ~0.631
+    assert 0.62 < result["ndcg_at_3"] < 0.64
+
+    # NDCG@5 and NDCG@10 same as NDCG@3 (only one relevant doc)
+    assert result["ndcg_at_5"] == result["ndcg_at_3"]
+
+
+def test_recall_ndcg_no_match():
+    """All zeros when no relevant doc is found."""
+    docs = [
+        Document(page_content="completely unrelated"),
+        Document(page_content="another unrelated"),
+    ]
+    result = evaluate_retrieval(docs, "the cat sat on the mat", k=5)
+    assert result["recall_at_1"] == 0.0
+    assert result["recall_at_5"] == 0.0
+    assert result["ndcg_at_1"] == 0.0
+    assert result["ndcg_at_5"] == 0.0
+
+
+def test_recall_ndcg_empty():
+    """Empty retrieval → all zeros."""
+    result = evaluate_retrieval([], "gold context")
+    assert result["recall_at_1"] == 0.0
+    assert result["ndcg_at_1"] == 0.0
+
+
+def test_ndcg_at_k_perfect():
+    """Match at position 1 → NDCG = 1.0."""
+    docs = [Document(page_content="the cat sat on the mat")]
+    result = evaluate_retrieval(docs, "the cat sat on the mat", k=5)
+    assert result["ndcg_at_1"] == 1.0
+    assert result["ndcg_at_5"] == 1.0
+    assert result["recall_at_1"] == 1.0
+
+
 # === Section 3: RAGAS (import test only — actual eval needs LLM) ===
 
 def test_ragas_importable():

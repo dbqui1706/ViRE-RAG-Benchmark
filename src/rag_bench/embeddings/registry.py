@@ -38,9 +38,6 @@ def list_models() -> list[str]:
     """List all registered model keys."""
     return sorted(_REGISTRY.keys())
 
-
-
-
 def _get_model_kwargs() -> dict:
     import torch
 
@@ -77,5 +74,12 @@ def _jina_v3():
 def _bge_m3():
     return HuggingFaceEmbeddings(
         model_name="BAAI/bge-m3",
+        model_kwargs=_get_model_kwargs()
+    )
+
+@register("multilingual-e5-large")
+def _multilingual_e5_large():
+    return HuggingFaceEmbeddings(
+        model_name="intfloat/multilingual-e5-large",
         model_kwargs=_get_model_kwargs()
     )

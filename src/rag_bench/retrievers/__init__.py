@@ -75,5 +75,6 @@ from . import dense as _dense
 from . import bm25 as _bm25
 from . import hybrid as _hybrid
 from . import expanded as _expanded
+from . import reranker as _reranker
 
 __all__ = ["BaseRetriever", "RetrievalResult", "get_retriever", "list_strategies", "register"]

@@ -56,6 +56,8 @@ def build_vectorstore(
 
     if collection.count() > 0 and not config.force_reindex:
         # Load existing
+        print(f"    [REUSE] Loaded existing index: {col_name} "
+              f"({collection.count()} chunks)")
         vectorstore = Chroma(
             client=client,
             collection_name=col_name,

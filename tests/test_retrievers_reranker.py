@@ -21,11 +21,11 @@ def test_reranker_retriever(mocker):
         base_retriever=mock_base,
         api_key="test_key",
         top_k=1,
-        top_m=2
     )
     
-    # Check that it properly overrided the inner top_k to match top_m safely
-    assert mock_base._top_k == 2
+    # Over-retrieval is now handled by the pipeline at construction time,
+    # so the base retriever's _top_k is not mutated by RerankRetriever.
+    assert mock_base._top_k == 5  # unchanged
     
     mock_rerank_method = mocker.patch.object(rerank_retriever.rerank_client, "rerank")
     

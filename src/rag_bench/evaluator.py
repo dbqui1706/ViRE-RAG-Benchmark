@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import asyncio
 import re
 import string
@@ -134,6 +136,42 @@ def context_match(retrieved_text: str, gold_context: str, threshold: float = 0.5
     return context_overlap(retrieved_text, gold_context) >= threshold
 
 
+# Multi-K evaluation depths
+_EVAL_K_VALUES = [1, 3, 5, 10]
+
+
+def recall_at_k(matches: list[bool], k: int) -> float:
+    """Recall@K with single-relevance ground truth.
+
+    Returns 1.0 if any of the top-K chunks match, else 0.0.
+    """
+    return 1.0 if any(matches[:k]) else 0.0
+
+
+def ndcg_at_k(matches: list[bool], k: int) -> float:
+    """NDCG@K with binary relevance.
+
+    Computes IDCG based on the actual number of relevant documents
+    (multiple chunks can match the same gold context after chunking).
+
+    Args:
+        matches: Boolean list — True if chunk at that rank is relevant.
+        k: Evaluation depth.
+
+    Returns:
+        NDCG score between 0.0 and 1.0.
+    """
+    dcg = sum(
+        (1.0 / math.log2(i + 2)) for i, m in enumerate(matches[:k]) if m
+    )
+    # IDCG: ideal ranking puts all relevant docs at top positions
+    n_rel = sum(matches[:k])
+    if n_rel == 0:
+        return 0.0
+    idcg = sum(1.0 / math.log2(i + 2) for i in range(n_rel))
+    return dcg / idcg
+
+
 def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> dict:
     """Evaluate retrieval quality by comparing retrieved documents to gold context.
 
@@ -143,7 +181,8 @@ def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> d
         k: Top-K to evaluate against.
 
     Returns:
-        Dict with context_precision, context_recall, mrr, hit_rate, best_overlap.
+        Dict with context_precision, context_recall, mrr, hit_rate,
+        best_overlap, and recall_at_k / ndcg_at_k for k in {1,3,5,10}.
     """
     texts = []
     for doc in documents[:k]:
@@ -153,7 +192,7 @@ def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> d
             texts.append(str(doc))
 
     if not texts:
-        return {
+        zero_dict = {
             "context_precision": 0.0,
             "context_recall": 0.0,
             "mrr": 0.0,
@@ -161,6 +200,10 @@ def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> d
             "best_overlap": 0.0,
             "combined_overlap": 0.0,
         }
+        for k_val in _EVAL_K_VALUES:
+            zero_dict[f"recall_at_{k_val}"] = 0.0
+            zero_dict[f"ndcg_at_{k_val}"] = 0.0
+        return zero_dict
 
     # Per-chunk bidirectional overlap (Counter-based)
     overlaps = [context_overlap(text, gold_context) for text in texts]
@@ -196,7 +239,7 @@ def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> d
     # Best overlap: highest overlap score among individual chunks
     best_overlap = max(overlaps)
 
-    return {
+    result_dict = {
         "context_precision": context_precision,
         "context_recall": context_recall,
         "mrr": mrr,
@@ -204,6 +247,14 @@ def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> d
         "best_overlap": best_overlap,
         "combined_overlap": combined_overlap,
     }
+
+    # Multi-K metrics (pad matches to handle k_val > len(matches))
+    for k_val in _EVAL_K_VALUES:
+        padded = matches + [False] * max(0, k_val - len(matches))
+        result_dict[f"recall_at_{k_val}"] = recall_at_k(padded, k_val)
+        result_dict[f"ndcg_at_{k_val}"] = ndcg_at_k(padded, k_val)
+
+    return result_dict
 
 
 # Section 3: RAGAS Evaluation (LLM-based metrics)

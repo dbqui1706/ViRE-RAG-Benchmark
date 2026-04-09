@@ -32,10 +32,6 @@ class RagConfig:
     # Prompt strategy
     prompt_strategy: str = "zero_shot"  # "zero_shot" or "few_shot"
     n_few_shot: int = 3  # Number of few-shot examples (auto-selected from dataset)
-    # Query Expansion
-    query_transform: str = "passthrough"
-    transform_llm_model: str = "gpt-4o-mini"
-    n_query_variations: int = 3
     # Evaluation options
     include_semantic: bool = False
     eval_faithfulness: bool = False
@@ -45,14 +41,18 @@ class RagConfig:
     rerank_model: str = "bge-reranker-v2-m3"
     rerank_factor: int = 3                     # Over-retrieve k*factor, rerank to k
     search_type: str = "similarity"            # similarity | mmr | hybrid | bm25_syl | bm25_word
+    query_transform: str = "passthrough"
+    transform_llm_model: str = "gpt-4o-mini"
+    n_query_variations: int = 3
 
     @classmethod
     def from_env(cls, **kwargs) -> RagConfig:
         """Create config, filling API credentials from environment.
 
         Uses OPENAI_API_KEY by default.
-        Set FPT_BASE_URL + FPT_API_KEY to use FPT endpoint instead.
+        Set LLM_BASE_URL + FPT_API_KEY to use FPT endpoint instead.
         """
         kwargs.setdefault("llm_api_key", os.environ.get("OPENAI_API_KEY", ""))
         kwargs.setdefault("llm_base_url", os.environ.get("LLM_BASE_URL", ""))
+        
         return cls(**kwargs)

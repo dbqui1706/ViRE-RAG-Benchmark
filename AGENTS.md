@@ -1,128 +1,84 @@
-# AGENTS.md — ViRE Project Guide
+# AGENTS.md - ViRE Workspace Instructions
 
-> This file helps AI coding agents (Jules, Gemini, etc.) understand the project
-> conventions and work effectively with the codebase.
+## Project Snapshot
 
-## Project Overview
+ViRE (Vietnamese RAG Evaluation) benchmarks retrieval-augmented generation pipelines on Vietnamese QA datasets.
 
-**ViRE (Vietnamese RAG Evaluation)** is a benchmarking toolkit for evaluating
-Retrieval-Augmented Generation pipelines on Vietnamese QA datasets.
+- Stack: Python 3.10+, LangChain, ChromaDB, OpenAI-compatible endpoints
+- Package entry point: `vi-rag-bench`
+- Core code: `src/rag_bench/`
 
-- **Paper:** "Which Works Best for Vietnamese?" — EACL 2026
-- **Stack:** Python 3.10+, LangChain, ChromaDB, OpenAI-compatible LLMs
-- **Package:** `vi-rag-bench` (installed via `pip install -e "."`)
+## Build And Test
 
-## Repository Structure
-
-```
-src/rag_bench/           # Main package
-├── cli.py               # CLI entry point (argparse → main())
-├── config.py            # RagConfig dataclass
-├── pipeline.py          # run_pipeline() + run_unified_pipeline()
-├── data_loader.py       # CSV loading, QA sampling, few-shot splitting
-├── chunker.py           # Passthrough + RecursiveCharacterTextSplitter
-├── indexer.py           # ChromaDB vector store build/load
-├── retriever.py         # Similarity, MMR, Hybrid (BM25+Dense+RRF)
-├── generator.py         # OpenAIGenerator (LCEL chain)
-├── evaluator.py         # EM, F1, ROUGE-L, BERTScore, RAGAS
-├── reporter.py          # JSON + Markdown report generation
-├── reranker.py          # FPT bge-reranker-v2-m3 API client
-├── timer.py             # Latency + cost tracking
-├── embeddings/
-│   └── registry.py      # Embedding model registry (@register decorator)
-└── query_transforms/
-    ├── base.py           # QueryTransformer ABC + registry
-    ├── multi_query.py    # Multi-query (LLM generates variants)
-    └── passthrough.py    # No-op transformer
-
-tests/                   # Pytest test suite
-data/                    # CSV datasets (DO NOT modify)
-outputs/                 # Experiment results (gitignored)
-scripts/                 # Utility scripts
-```
-
-## Setup & Development
+Use these commands by default:
 
 ```bash
-# Install (editable mode)
+# Install
 pip install -e "."
-
-# Install with dev dependencies
 pip install -e ".[dev]"
+pip install -e ".[dev,semantic,evaluation,vietnamese]"
 
-# Install all optional dependencies
-pip install -e ".[dev,semantic,evaluation]"
-
-# Run tests
-pytest tests/ -v
-
-# Run linting
+# Lint
 ruff check src/ tests/
+
+# Test
+pytest tests/ -v
+pytest tests/ -v -m "not slow"
+pytest tests/ -v -m "not integration"
 ```
 
-## Testing Conventions
+## Architecture
 
-- Framework: **pytest** + **pytest-mock**
-- Fixtures: defined in `tests/conftest.py`
-- Mock external services (ChromaDB, OpenAI API) — never call real APIs in tests
-- Test files follow `test_<module>.py` naming convention
-- Use `tmp_path` fixture for temporary files
-- Tests MUST be runnable without API keys or GPU
+Primary pipeline flow:
+
+```text
+CSV -> load_dataset() -> chunk() -> build_vectorstore()
+-> batch_advanced_retrieve() -> batch_generate()
+-> evaluate_answer()/evaluate_retrieval() -> save_results()
+```
+
+Module boundaries in `src/rag_bench/`:
+
+- `cli.py`: argparse entry point and mode selection
+- `config.py`: `RagConfig` and environment-backed settings
+- `data_loader.py`: dataset normalization, sampling, few-shot splitting
+- `chunker.py`: passthrough and recursive chunking strategies
+- `indexer.py`: ChromaDB build/load lifecycle
+- `retrievers/`: retrieval strategy implementations and registry-based selection
+- `query_transforms/`: query transform registry and implementations
+- `generator.py`: LCEL generation chain and batched execution
+- `evaluator.py`: generation, retrieval, semantic, and optional faithfulness metrics
+- `reporter.py`: JSON/Markdown output artifacts
+- `pipeline.py`: orchestration (`run_pipeline`, `run_unified_pipeline`)
 
 ## Code Style
 
-- **Type hints:** Required on all public function signatures
-- **Docstrings:** Google-style (Args, Returns, Raises, Example)
-- **Imports:** Use `from __future__ import annotations` at top of every module
-- **Line length:** 100 characters max
-- **Formatting:** Follow PEP 8 conventions
-- **Vietnamese:** Comments in Vietnamese are acceptable; code and docstrings in English
+- Type hints are required on public function signatures.
+- Use Google-style docstrings for public APIs.
+- Keep `from __future__ import annotations` at module top.
+- Target max line length: 100.
+- Keep code/docstrings in English; Vietnamese comments are acceptable.
 
-## Architecture Patterns
+## Conventions
 
-### Registry Pattern
-Both embedding models and query transformers use a decorator-based registry:
-```python
-@register("model-key")
-def _factory():
-    return SomeModel(...)
-```
-When adding new models/transformers, follow this pattern.
+- Follow decorator-based registries for extensibility (embeddings, retrievers, query transforms).
+- Preserve LCEL-style generator composition (`Prompt | ChatModel | OutputParser`).
+- Mock external services (LLM endpoints, vector stores) in unit tests.
+- Tests should run without API keys or GPU unless explicitly marked integration.
 
-### LCEL Chain
-The generator uses LangChain Expression Language:
-```python
-chain = ChatPromptTemplate | ChatOpenAI | StrOutputParser
-```
-Batch processing uses `chain.batch()` with `max_concurrency`.
+## Project Gotchas
 
-### Data Flow
-```
-CSV → load_dataset() → Documents + QA pairs
-  → get_chunker().chunk() → chunked Documents
-  → build_vectorstore() → ChromaDB
-  → batch_advanced_retrieve() → RetrievalResult[]
-  → OpenAIGenerator.batch_generate() → GenerationResult[]
-  → evaluate_answer() + evaluate_retrieval() → scores
-  → save_results() → JSON + Markdown
-```
+- Do not modify files under `data/`.
+- `outputs/` is experiment output and is gitignored.
+- ZaloLegalQA may have empty gold answers; handle missing/empty `answer` safely.
+- Chroma collection names are constrained to `{dataset}_{model_key}` with <= 63 characters.
+- Few-shot examples must be split from eval samples to avoid leakage.
 
-## Environment Variables
+## Reference Docs (Link, Do Not Duplicate)
 
-```bash
-OPENAI_API_KEY=...         # Required for generation + RAGAS
-HF_TOKEN=...               # Optional: gated HuggingFace models
-LLM_BASE_URL=...           # Optional: custom LLM endpoint
-FPT_API_KEY=...            # Optional: FPT AI Marketplace
-FPT_BASE_URL=...           # Optional: FPT endpoint
-TRANSFORM_LLM_MODEL=...   # Optional: query transform LLM
-```
-
-## Important Notes
-
-- **data/ directory** contains research datasets — DO NOT modify or delete
-- **outputs/** is gitignored — experiment results live here
-- ChromaDB collections use naming: `{dataset}_{model_key}` (max 63 chars)
-- The `_clean()` method in generator.py strips `<think>` tags from reasoning LLMs
-- ZaloLegalQA has no gold answers — handle empty `answer` column gracefully
-- Few-shot examples are split from eval set to prevent data leakage
+- Setup, CLI usage, dataset overview: `README.md`
+- Contribution workflow and commit/test standards: `CONTRIBUTING.md`
+- Retrieval architecture details: `docs/superpowers/specs/2026-04-03-retrieval-architecture-design.md`
+- Evaluation metric definitions: `docs/superpowers/specs/2026-03-27-rag-evaluation-metrics-design.md`
+- Query expansion and transform design: `docs/superpowers/specs/2026-04-08-query-expansion-specification.md`
+- Advanced RAG foundation context: `docs/superpowers/specs/2026-03-30-advanced-rag-foundation-phase1.md`
