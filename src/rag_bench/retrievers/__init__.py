@@ -73,7 +73,9 @@ def list_strategies() -> list[str]:
 
 from . import dense as _dense
 from . import bm25 as _bm25
+from . import tfidf as _tfidf
 from . import hybrid as _hybrid
+from . import hybrid_weighted as _hybrid_weighted
 from . import expanded as _expanded
 from . import reranker as _reranker
 
