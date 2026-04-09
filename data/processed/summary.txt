@@ -3,7 +3,6 @@ Chunking Benchmark -- Processed Dataset Summary
 Source: data/unified_vqa.csv
 Excluded: ['ZaloLegalQA', 'ALQAC']
 Max pairs per dataset: 1000
-Seed: 42
 
 Dataset                Original    Sampled
 ---------------------------------------------

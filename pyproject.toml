@@ -21,6 +21,7 @@ dependencies = [
     "numpy>=2.0",
     "tqdm>=4.67",
     "python-dotenv>=1.0",
+    "scikit-learn>=1.0",
 ]
 
 [project.optional-dependencies]
