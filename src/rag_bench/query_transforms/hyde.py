@@ -2,6 +2,7 @@ from __future__ import annotations
 from .base import QueryTransformer, register
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
 
 import os
 
@@ -18,6 +19,9 @@ def _factory(**kwargs) -> HydeTransformer:
         
     return HydeTransformer(llm_model=llm_model, base_url=base_url, api_key=api_key)
 
+class HydeResponse(BaseModel):
+    document: str = Field(description="Đoạn văn bản giả định bằng tiếng Việt để trả lời câu hỏi.")
+
 class HydeTransformer(QueryTransformer):
     def __init__(self, llm_model: str, base_url: str | None, api_key: str | None):
         
@@ -30,11 +34,11 @@ class HydeTransformer(QueryTransformer):
         if base_url:
             chat_kwargs["openai_api_base"] = base_url
             
-        self.llm = ChatOpenAI(**chat_kwargs)
+        self.llm = ChatOpenAI(**chat_kwargs).with_structured_output(HydeResponse)
         
         from langchain_core.prompts import SystemMessagePromptTemplate, HumanMessagePromptTemplate
         system_prompt_template = SystemMessagePromptTemplate.from_template(
-            "Bạn là một trợ lý AI. Hãy viết một đoạn văn bản giả định bằng tiếng Việt để trả lời câu hỏi dưới đây. Không cần giải thích thêm, chỉ viết nội dung của đoạn văn bản."
+            "Bạn là một trợ lý AI. Hãy viết một đoạn văn bản giả định bằng tiếng Việt để trả lời câu hỏi dưới đây."
         )
         human_prompt_template = HumanMessagePromptTemplate.from_template("{question}")
         
@@ -45,6 +49,6 @@ class HydeTransformer(QueryTransformer):
         results = []
         for q in queries:
             resp = self.chain.invoke({"question": q})
-            doc = str(resp.content).strip()
+            doc = resp.document.strip()
             results.append([doc])
         return results

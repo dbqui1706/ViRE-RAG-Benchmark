@@ -2,6 +2,7 @@ from __future__ import annotations
 from .base import QueryTransformer, register
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
 
 from tqdm import tqdm
 from dotenv import load_dotenv
@@ -22,6 +23,8 @@ def _factory(**kwargs) -> QueryExpansionTransformer:
         
     return QueryExpansionTransformer(llm_model=llm_model, base_url=base_url, api_key=api_key)
 
+class ExpansionResponse(BaseModel):
+    keywords: str = Field(description="Các từ khóa, từ đồng nghĩa hoặc khái niệm liên quan trọng yếu nhất (tối đa 4-5 từ/cụm từ), phân cách bằng dấu phẩy.")
 
 class QueryExpansionTransformer(QueryTransformer):
     def __init__(self, llm_model: str, base_url: str | None, api_key: str | None):
@@ -37,7 +40,7 @@ class QueryExpansionTransformer(QueryTransformer):
         if base_url:
             chat_kwargs["openai_api_base"] = base_url
             
-        self.llm = ChatOpenAI(**chat_kwargs)
+        self.llm = ChatOpenAI(**chat_kwargs).with_structured_output(ExpansionResponse)
         self.prompt = self._build_prompt()
         self.chain = self.prompt | self.llm
 
@@ -45,7 +48,7 @@ class QueryExpansionTransformer(QueryTransformer):
         results = []
         for q in tqdm(queries, desc="Expanding queries"):
             resp = self.chain.invoke({"question": q})
-            keywords = str(resp.content).strip()
+            keywords = resp.keywords.strip()
             
             # Combine the original query with the generated keywords
             expanded_query = f"{q} {keywords}"
@@ -59,9 +62,7 @@ class QueryExpansionTransformer(QueryTransformer):
         system_prompt_template = SystemMessagePromptTemplate.from_template(
             "Bạn là một chuyên gia ngôn ngữ học. Nhiệm vụ của bạn là mở rộng câu hỏi của người dùng "
             "bằng cách trích xuất các từ khóa chính, sau đó cung cấp thêm các từ đồng nghĩa (synonyms) "
-            "hoặc các thuật ngữ/khái niệm liên quan trọng yếu nhất (tối đa 4-5 từ/cụm từ).\n\n"
-            "Chỉ trả về ĐÚNG MỘT DÒNG DUY NHẤT chứa các từ khóa/thuật ngữ đó, phân cách nhau bằng dấu phẩy. "
-            "Tuyệt đối không giải thích, không gạch đầu dòng."
+            "hoặc các thuật ngữ/khái niệm liên quan trọng yếu nhất (tối đa 4-5 từ/cụm từ)."
         )
         human_prompt_template = HumanMessagePromptTemplate.from_template("{question}") 
         

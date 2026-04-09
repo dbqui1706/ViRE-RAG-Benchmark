@@ -2,6 +2,7 @@ from __future__ import annotations
 from .base import QueryTransformer, register
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
 
 from tqdm import tqdm
 from dotenv import load_dotenv
@@ -21,6 +22,8 @@ def _factory(**kwargs) -> StepBackTransformer:
         
     return StepBackTransformer(llm_model=llm_model, base_url=base_url, api_key=api_key)
 
+class StepBackResponse(BaseModel):
+    question: str = Field(description="Câu hỏi mang tính nguyên lý hoặc tổng quát hơn.")
 
 class StepBackTransformer(QueryTransformer):
     """Generates a step-back (generalized) question and returns both original and step-back question."""
@@ -38,7 +41,7 @@ class StepBackTransformer(QueryTransformer):
         if base_url:
             chat_kwargs["openai_api_base"] = base_url
             
-        self.llm = ChatOpenAI(**chat_kwargs)
+        self.llm = ChatOpenAI(**chat_kwargs).with_structured_output(StepBackResponse)
         self.prompt = self._build_prompt()
         self.chain = self.prompt | self.llm
 
@@ -46,7 +49,7 @@ class StepBackTransformer(QueryTransformer):
         results = []
         for q in tqdm(queries, desc="Generating step-back queries"):
             resp = self.chain.invoke({"question": q})
-            step_back_q = str(resp.content).strip()
+            step_back_q = resp.question.strip()
             
             # Return both the original query and the step-back query for RRF fusion
             # ExpandedRetriever will retrieve both independently and merge them
@@ -60,8 +63,7 @@ class StepBackTransformer(QueryTransformer):
         system_prompt_template = SystemMessagePromptTemplate.from_template(
             "Bạn là một chuyên gia. Nhiệm vụ của bạn là chuyển đổi câu hỏi cụ thể của người dùng "
             "thành một câu hỏi mang tính nguyên lý hoặc có phạm vi tổng quát hơn (Step-back question). "
-            "Điều này giúp truy xuất được những tài liệu chứa thông tin nền tảng quan trọng trước khi đi vào chi tiết.\n\n"
-            "Chỉ trả về ĐÚNG MỘT DÒNG mang nội dung của câu hỏi tổng quát đó. Tuyệt đối không giải thích."
+            "Điều này giúp truy xuất được những tài liệu chứa thông tin nền tảng quan trọng trước khi đi vào chi tiết."
         )
         human_prompt_template = HumanMessagePromptTemplate.from_template("{question}") 
         

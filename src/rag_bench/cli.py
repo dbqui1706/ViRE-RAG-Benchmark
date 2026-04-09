@@ -93,16 +93,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # Query Expansion options
     parser.add_argument(
         "--query-transform", type=str, default="passthrough",
-        help="passthrough | multi_query | hyde",
+        choices=["passthrough", "query_expansion", "step_back", "hyde", "decompose"],
+        help="Query expansion strategy: passthrough (default), query_expansion (A3), step_back (A4), hyde (A2), or decompose (A12 Multi-hop)",
     )
     parser.add_argument(
         "--transform-llm-model", type=str, default="gpt-4o-mini",
-        help="LLM for query transforms",
+        help="LLM for query transforms decompose",
     )
     parser.add_argument(
         "--n-query-variations", type=int, default=3,
-        help="Number of variations for multi_query",
+        help="Number of variations for ",
     )
+
     # Retrieval options
     parser.add_argument(
         "--search-type", default="similarity",

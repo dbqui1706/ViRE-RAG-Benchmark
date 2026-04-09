@@ -44,6 +44,7 @@ class RagConfig:
     query_transform: str = "passthrough"
     transform_llm_model: str = "gpt-4o-mini"
     n_query_variations: int = 3
+    max_sub_questions: int = 3 # cater for Decompose strategy
 
     @classmethod
     def from_env(cls, **kwargs) -> RagConfig:
