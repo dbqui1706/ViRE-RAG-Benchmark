@@ -22,14 +22,26 @@ def test_hyde_transformer():
         assert len(result) == 1
         assert result[0] == ["This is a hypothetical document."]
 
-def test_multi_query_transformer():
-    with patch("rag_bench.query_transforms.multi_query.ChatOpenAI"):
-        transformer = get_transformer("multi_query", llm_model="gpt-4o-mini", n_variations=3)
-        mock_response = AIMessage(content="variant 1\nvariant 2\nvariant 3")
+def test_query_expansion_transformer():
+    with patch("rag_bench.query_transforms.query_expansion.ChatOpenAI"):
+        transformer = get_transformer("query_expansion", llm_model="gpt-4o-mini")
+        mock_response = AIMessage(content="keyword1, keyword2, keyword3")
         transformer.chain = MagicMock()
         transformer.chain.invoke.return_value = mock_response
         
         result = transformer.batch_transform(["test question"])
         
         assert len(result) == 1
-        assert result[0] == ["test question", "variant 1", "variant 2", "variant 3"]
+        assert result[0] == ["test question keyword1, keyword2, keyword3"]
+
+def test_step_back_transformer():
+    with patch("rag_bench.query_transforms.step_back.ChatOpenAI"):
+        transformer = get_transformer("step_back", llm_model="gpt-4o-mini")
+        mock_response = AIMessage(content="This is a generalized step-back question?")
+        transformer.chain = MagicMock()
+        transformer.chain.invoke.return_value = mock_response
+        
+        result = transformer.batch_transform(["test detailed question?"])
+        
+        assert len(result) == 1
+        assert result[0] == ["test detailed question?", "This is a generalized step-back question?"]
