@@ -51,3 +51,8 @@ run.txt
 
 # Temporary file
 temp_*.py
+
+# Local-only files
+AGENTS.md
+benchmark/prepare_data.py
+benchmark/eda_benchmark.py
