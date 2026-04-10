@@ -1,13 +1,16 @@
-"""A8 Self-RAG — Iterative retrieve-evaluate-regenerate generation strategy."""
+"""Self-RAG — Iterative retrieve-evaluate-regenerate generation strategy."""
 
 from __future__ import annotations
 
 import re
 import time
 from typing import Any
+from uuid import UUID
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.outputs import LLMResult
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
@@ -15,6 +18,31 @@ from tqdm.auto import tqdm
 
 from .generator import GenerationResult, build_prompt
 from .retrievers.base import BaseRetriever, RetrievalResult
+
+
+class TokenTracker(BaseCallbackHandler):
+    """Accumulates input/output token counts across multiple LLM calls."""
+
+    def __init__(self):
+        super().__init__()
+        self.total_input_tokens: int = 0
+        self.total_output_tokens: int = 0
+
+    def on_llm_end(
+        self,
+        response: LLMResult,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Called after every LLM response — accumulate token usage."""
+        usage = {}
+        if response.llm_output:
+            usage = response.llm_output.get("token_usage", {})
+        self.total_input_tokens += usage.get("prompt_tokens", 0)
+        self.total_output_tokens += usage.get("completion_tokens", 0)
+
 
 # ---------------------------------------------------------------------------
 # Pydantic Structured Output Models
@@ -116,12 +144,12 @@ class SelfRAGGenerator:
         if base_url:
             llm_kwargs["openai_api_base"] = base_url
 
-        # ① Generation chain — reuse build_prompt() from generator.py
+        # 1. Generation chain — reuse build_prompt() from generator.py
         gen_llm = ChatOpenAI(**llm_kwargs, max_tokens=max_tokens)
         gen_prompt = build_prompt(few_shot_examples)
         self.gen_chain = gen_prompt | gen_llm | StrOutputParser()
 
-        # ② Evaluation chain — structured output
+        # 2. Evaluation chain — structured output
         eval_llm = ChatOpenAI(**llm_kwargs, max_tokens=128).with_structured_output(
             SelfEvaluation
         )
@@ -131,7 +159,7 @@ class SelfRAGGenerator:
         ])
         self.eval_chain = eval_prompt | eval_llm
 
-        # ③ Refine chain — structured output
+        # 3. Refine chain — structured output
         refine_llm = ChatOpenAI(**llm_kwargs, max_tokens=128).with_structured_output(
             RefinedQuery
         )
@@ -179,22 +207,30 @@ class SelfRAGGenerator:
         context_docs = list(initial_docs)
         llm_calls = 0
         draft = ""
+        tracker = TokenTracker()
+        cb_config = {"callbacks": [tracker]}
         t0 = time.perf_counter()
 
         for iteration in range(1, self.max_iterations + 1):
-            # ① Generate draft answer
+            # 1. Generate draft answer
             context_text = self._join_context(context_docs)
             draft = self._clean(
-                self.gen_chain.invoke({"question": question, "context": context_text})
+                self.gen_chain.invoke(
+                    {"question": question, "context": context_text},
+                    config=cb_config,
+                )
             )
             llm_calls += 1
 
-            # ② Self-evaluate
-            eval_resp = self.eval_chain.invoke({
-                "question": question,
-                "context": context_text,
-                "answer": draft,
-            })
+            # 2. Self-evaluate
+            eval_resp = self.eval_chain.invoke(
+                {
+                    "question": question,
+                    "context": context_text,
+                    "answer": draft,
+                },
+                config=cb_config,
+            )
             llm_calls += 1
 
             if eval_resp.verdict == "SUPPORTED":
@@ -202,20 +238,23 @@ class SelfRAGGenerator:
                 return GenerationResult(
                     text=draft,
                     generation_ms=gen_ms,
-                    input_tokens=0,  # Token tracking not available per-chain
-                    output_tokens=0,
+                    input_tokens=tracker.total_input_tokens,
+                    output_tokens=tracker.total_output_tokens,
                     iterations=iteration,
                     total_llm_calls=llm_calls,
                 )
 
-            # ③ Refine query
-            refine_resp = self.refine_chain.invoke({
-                "question": question,
-                "draft_answer": draft,
-            })
+            # 3. Refine query
+            refine_resp = self.refine_chain.invoke(
+                {
+                    "question": question,
+                    "draft_answer": draft,
+                },
+                config=cb_config,
+            )
             llm_calls += 1
 
-            # ④ Re-retrieve and merge context
+            # 4. Re-retrieve and merge context
             new_docs = self.retriever.retrieve(refine_resp.query)
             context_docs = self._merge_docs(context_docs, new_docs)
 
@@ -224,8 +263,8 @@ class SelfRAGGenerator:
         return GenerationResult(
             text=draft,
             generation_ms=gen_ms,
-            input_tokens=0,
-            output_tokens=0,
+            input_tokens=tracker.total_input_tokens,
+            output_tokens=tracker.total_output_tokens,
             iterations=self.max_iterations,
             total_llm_calls=llm_calls,
         )
