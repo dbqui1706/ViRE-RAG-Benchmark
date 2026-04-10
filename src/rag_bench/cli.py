@@ -102,7 +102,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--n-query-variations", type=int, default=3,
-        help="Number of variations for ",
+        help="Number of query variations for multi-query expansion (default: 3)",
+    )
+    parser.add_argument(
+        "--max-sub-questions", type=int, default=3,
+        help="Max sub-questions for decompose query transform (default: 3)",
     )
 
     # Retrieval options
@@ -126,6 +130,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--compress", action="store_true",
         help="Enable Contextual Compression (A6) — LLM compresses each chunk to query-relevant content",
+    )
+    # Generation strategy
+    parser.add_argument(
+        "--generation-strategy", default="standard",
+        choices=["standard", "self_rag"],
+        help="Generation strategy: standard (single-pass) or self_rag (iterative retrieve-evaluate-regenerate)",
+    )
+    parser.add_argument(
+        "--self-rag-max-iter", type=int, default=3,
+        help="Max Self-RAG iterations per question (default: 3)",
     )
     return parser.parse_args(argv)
 
@@ -180,6 +194,8 @@ def main(argv: list[str] | None = None) -> None:
                 corrective=args.corrective,
                 compress=args.compress,
                 search_type=args.search_type,
+                generation_strategy=args.generation_strategy,
+                self_rag_max_iter=args.self_rag_max_iter,
             )
             run_unified_pipeline(config, dataset_paths)
         return
@@ -213,10 +229,13 @@ def main(argv: list[str] | None = None) -> None:
             query_transform=args.query_transform,
             transform_llm_model=args.transform_llm_model,
             n_query_variations=args.n_query_variations,
+            max_sub_questions=args.max_sub_questions,
             rerank=args.rerank,
             corrective=args.corrective,
             compress=args.compress,
             search_type=args.search_type,
+            generation_strategy=args.generation_strategy,
+            self_rag_max_iter=args.self_rag_max_iter,
         )
         run_pipeline(config)
 

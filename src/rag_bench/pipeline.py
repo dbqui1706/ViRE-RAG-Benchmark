@@ -125,12 +125,43 @@ def _prepare_qa(config: RagConfig, csv_path: str):
 
 
 def _generate(config: RagConfig, retrieval_results: list[RetrievalResult],
-              few_shot_examples=None):
+              few_shot_examples=None, retriever=None):
     """Run batch LLM generation over retrieval results.
+
+    When ``config.generation_strategy == "self_rag"``, uses the iterative
+    SelfRAGGenerator instead of the standard single-pass OpenAIGenerator.
+
+    Args:
+        config: Experiment configuration.
+        retrieval_results: Retrieved documents for each question.
+        few_shot_examples: Optional few-shot examples.
+        retriever: Required for self_rag strategy (needs re-retrieval access).
 
     Returns:
         list of generation result objects.
     """
+    if config.generation_strategy == "self_rag":
+        from .self_rag import SelfRAGGenerator
+        if retriever is None:
+            raise ValueError("Self-RAG strategy requires a retriever for re-retrieval")
+        gen = SelfRAGGenerator(
+            retriever=retriever,
+            model=config.llm_model,
+            api_key=config.llm_api_key,
+            base_url=config.llm_base_url or None,
+            max_iterations=config.self_rag_max_iter,
+            few_shot_examples=few_shot_examples,
+        )
+        gen_items = [
+            {
+                "question": r.question,
+                "context": "\n\n".join(doc.page_content for doc in r.documents),
+            }
+            for r in retrieval_results
+        ]
+        return gen.batch_generate(gen_items, retrieval_results)
+
+    # Standard single-pass generation
     llm = OpenAIGenerator(
         model=config.llm_model,
         api_key=config.llm_api_key,
@@ -154,7 +185,7 @@ def _build_generations(qa_pairs, retrieval_results, gen_results):
     for i, qa in enumerate(qa_pairs):
         ret = retrieval_results[i]
         gen = gen_results[i]
-        generations.append({
+        entry = {
             "qid": qa["qid"],
             "question": qa["question"],
             "gold_answer": qa["answer"],
@@ -165,7 +196,12 @@ def _build_generations(qa_pairs, retrieval_results, gen_results):
             "total_ms": ret.retrieval_ms + gen.generation_ms,
             "input_tokens": gen.input_tokens,
             "output_tokens": gen.output_tokens,
-        })
+        }
+        # Self-RAG tracking fields (only present for self_rag strategy)
+        if gen.iterations is not None:
+            entry["self_rag_iterations"] = gen.iterations
+            entry["self_rag_llm_calls"] = gen.total_llm_calls
+        generations.append(entry)
     return generations
 
 
@@ -273,6 +309,7 @@ def _save_evaluations(config: RagConfig, metrics: dict, out_dir: Path,
             "rerank": config.rerank,
             "corrective": config.corrective,
             "compress": config.compress,
+            "generation_strategy": config.generation_strategy,
         },
         **metrics,
     }
@@ -349,6 +386,8 @@ def _output_dir(config: RagConfig, dataset_name: str, suffix: str = "") -> Path:
         strategy += "+corrective"
     if config.compress:
         strategy += "+compress"
+    if config.generation_strategy == "self_rag":
+        strategy += "+self_rag"
     out = Path(config.output_dir) / name / strategy / config.embed_model
     out.mkdir(parents=True, exist_ok=True)
     return out
@@ -379,7 +418,7 @@ def run_pipeline(config: RagConfig) -> dict:
     retrieval_results = retriever.batch_retrieve(questions)
 
     print(f"  Generating {len(questions)} answers...")
-    gen_results = _generate(config, retrieval_results, few_shot)
+    gen_results = _generate(config, retrieval_results, few_shot, retriever=retriever)
 
     # Save generations
     generations = _build_generations(qa_pairs, retrieval_results, gen_results)
@@ -422,7 +461,7 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
         questions = [qa["question"] for qa in qa_pairs]
         print(f"  Retrieving {len(questions)}/{dataset_name} queries ({config.search_type})...")
         retrieval_results = retriever.batch_retrieve(questions)
-        gen_results = _generate(config, retrieval_results, few_shot)
+        gen_results = _generate(config, retrieval_results, few_shot, retriever=retriever)
 
         # Save generations
         generations = _build_generations(qa_pairs, retrieval_results, gen_results)

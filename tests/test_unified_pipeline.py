@@ -41,6 +41,8 @@ def _mock_gen():
     m.generation_ms = 1.0
     m.input_tokens = 10
     m.output_tokens = 5
+    m.iterations = None
+    m.total_llm_calls = None
     return m
 
 

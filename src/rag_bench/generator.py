@@ -47,6 +47,9 @@ class GenerationResult:
     generation_ms: float
     input_tokens: int
     output_tokens: int
+    # Self-RAG tracking fields (None for standard generation)
+    iterations: int | None = None
+    total_llm_calls: int | None = None
 
 # ---------------------------------------------------------------------------
 # Prompt Templates
@@ -175,13 +178,13 @@ class OpenAIGenerator:
         results = []
         for i, r in enumerate(responses):
             tokens = cb.token_usage[i] if i < len(cb.token_usage) else {}
-            
+
             if isinstance(r, Exception):
-                print(f"Warning: Exception at item {i} - {str(r)}")
+                print(f"Warning: Exception at item {i} - {r!s}")
                 text = ""
             else:
                 text = self._clean(r)
-                
+
             results.append(GenerationResult(
                 text=text,
                 generation_ms=avg_ms,

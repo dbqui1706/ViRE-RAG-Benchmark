@@ -48,6 +48,9 @@ class RagConfig:
     transform_llm_model: str = "gpt-4o-mini"
     n_query_variations: int = 3
     max_sub_questions: int = 3 # cater for Decompose strategy
+    # Generation strategy
+    generation_strategy: str = "standard"      # "standard" | "self_rag"
+    self_rag_max_iter: int = 3                 # Max Self-RAG iterations per question
 
     @classmethod
     def from_env(cls, **kwargs) -> RagConfig:
@@ -58,5 +61,5 @@ class RagConfig:
         """
         kwargs.setdefault("llm_api_key", os.environ.get("OPENAI_API_KEY", ""))
         kwargs.setdefault("llm_base_url", os.environ.get("LLM_BASE_URL", ""))
-        
+
         return cls(**kwargs)
