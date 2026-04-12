@@ -41,10 +41,10 @@ from rag_bench.indexer import build_vectorstore
 # Fixed parameters
 SEED = 42
 BENCHMARK_CSV = "data/processed/benchmark.csv"
-EMBED_MODEL_KEY = "multilingual-e5-large"
-CHUNK_STRATEGY = "recursive"
-CHUNK_SIZE = 512
-CHUNK_OVERLAP = 50
+EMBED_MODEL_KEY = "vi-bi-encoder" # namdp-ptit/ViDense, bkai-foundation-models/vietnamese-bi-encoder
+CHUNK_STRATEGY = "sentence"
+CHUNK_SIZE = 0
+CHUNK_OVERLAP = 0
 TOP_K = 10
 MAX_EVAL_SAMPLES = 500
 
@@ -351,7 +351,7 @@ def main():
     vs = build_vectorstore(
         chunks, embed_model, rag_cfg,
         dataset_name="retrieval_benchmark",
-        model_key=f"recursive_{CHUNK_SIZE}_{CHUNK_OVERLAP}",
+        model_key=f"{CHUNK_STRATEGY}-{EMBED_MODEL_KEY}",
     )
 
     # Run each retrieval strategy

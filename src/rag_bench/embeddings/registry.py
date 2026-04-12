@@ -83,3 +83,17 @@ def _multilingual_e5_large():
         model_name="intfloat/multilingual-e5-large",
         model_kwargs=_get_model_kwargs()
     )
+
+@register("vi-dense")
+def _vi_dense():
+    return HuggingFaceEmbeddings(
+        model_name="namdp-ptit/ViDense",
+        model_kwargs=_get_model_kwargs()
+    )
+
+@register("vi-bi-encoder")
+def _vi_bi_encoder():
+    return HuggingFaceEmbeddings(
+        model_name="bkai-foundation-models/vietnamese-bi-encoder",
+        model_kwargs=_get_model_kwargs()
+    )
