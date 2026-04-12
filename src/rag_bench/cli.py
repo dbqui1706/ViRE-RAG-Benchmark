@@ -60,8 +60,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # Chunking options
     parser.add_argument(
         "--chunk-strategy", default="recursive",
-        choices=["passthrough", "recursive"],
-        help="Chunking strategy: passthrough (no chunking) or recursive (256 tokens)",
+        choices=["passthrough", "fixed", "sentence", "paragraph", "recursive", "semantic"],
+        help="Chunking strategy: passthrough, fixed, sentence (underthesea), "
+             "paragraph, recursive (default), or semantic",
     )
     parser.add_argument("--chunk-size", type=int, default=256, help="Chunk size in tokens")
     parser.add_argument("--chunk-overlap", type=int, default=50, help="Chunk overlap in tokens")
@@ -161,12 +162,9 @@ def main(argv: list[str] | None = None) -> None:
     #  Unified index mode
     if args.unified_csv:
         dataset_paths = args.datasets or ([args.csv] if args.csv else [])
-        if not dataset_paths:
-            print("ERROR: --unified-csv requires dataset paths via --datasets or --csv")
-            return
         for model_key in models:
             config = RagConfig.from_env(
-                csv_path=dataset_paths[0],  # placeholder; unified pipeline uses unified_index_csv
+                csv_path=args.unified_csv,  # use unified csv as source
                 embed_model=model_key,
                 llm_model=args.llm_model,
                 llm_base_url=args.llm_base_url,

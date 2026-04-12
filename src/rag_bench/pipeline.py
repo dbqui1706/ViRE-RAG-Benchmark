@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import random
 from pathlib import Path
 
+import pandas as pd
 from openai import AsyncOpenAI
 from tqdm import tqdm
 
@@ -122,6 +124,51 @@ def _prepare_qa(config: RagConfig, csv_path: str):
 
     qa_pairs = sample_qa_pairs(all_qa, max_samples=config.max_samples, seed=config.sample_seed)
     return qa_pairs, few_shot
+
+
+def _load_benchmark_qa(
+    csv_path: str,
+    max_samples: int = 500,
+    seed: int = 42,
+) -> dict[str, list[dict]]:
+    """Load a unified CSV with ``dataset`` column and group QA pairs by dataset.
+
+    Each dataset group is independently sampled to at most ``max_samples`` rows.
+    This mirrors the approach used in ``benchmark/chunking_benchmark.py``.
+
+    Args:
+        csv_path: Path to a CSV containing columns: question, answer, context, dataset.
+        max_samples: Max QA pairs per dataset.
+        seed: Random seed for sampling.
+
+    Returns:
+        Dict mapping dataset name -> list of QA pair dicts.
+    """
+    df = pd.read_csv(csv_path, encoding="utf-8")
+    df["answer"] = df["answer"].fillna("")
+
+    if "dataset" not in df.columns:
+        raise ValueError(
+            f"{csv_path} has no 'dataset' column. "
+            "Use --datasets to specify individual CSV files instead."
+        )
+
+    rng = random.Random(seed)
+    qa_by_dataset: dict[str, list[dict]] = {}
+    for ds_name, group in df.groupby("dataset"):
+        pairs = []
+        for idx, (_, row) in enumerate(group.iterrows()):
+            pairs.append({
+                "qid": str(row.get("qid", idx)),
+                "question": str(row["question"]),
+                "answer": str(row["answer"]),
+                "context": str(row["context"]),
+            })
+        if len(pairs) > max_samples:
+            pairs = rng.sample(pairs, max_samples)
+        qa_by_dataset[str(ds_name)] = pairs
+
+    return qa_by_dataset
 
 
 def _generate(config: RagConfig, retrieval_results: list[RetrievalResult],
@@ -438,6 +485,11 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
 
     Builds a single vectorstore from ``config.unified_index_csv``, then
     evaluates each dataset's queries against it independently.
+
+    When ``dataset_csv_paths`` is empty, the pipeline auto-splits
+    ``config.unified_index_csv`` by the ``dataset`` column and samples
+    ``config.max_samples`` QA pairs per dataset group.  This is the
+    recommended mode for ``data/processed/benchmark.csv``.
     """
     assert config.unified_index_csv, "unified_index_csv must be set"
     print(f"[Unified] Building shared index from {config.unified_index_csv}")
@@ -447,19 +499,40 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
     retriever = _build_retriever(config, vectorstore=vectorstore, docs=docs)
     print("[Unified] Shared index ready.\n")
 
-    # Evaluate each dataset
-    all_results = []
-    for csv_path in dataset_csv_paths:
-        dataset_name = Path(csv_path).stem
-        out_dir = _output_dir(config, dataset_name)
-        print(f"[Unified] ── {dataset_name} ──")
+    # ── Decide QA loading strategy ─────────────────────────────────
+    if dataset_csv_paths:
+        # Legacy mode: load from separate CSV files
+        qa_groups = {
+            Path(p).stem: _prepare_qa(config, p) for p in dataset_csv_paths
+        }
+    else:
+        # Auto-split mode: group by 'dataset' column in benchmark.csv
+        print(f"[Unified] Auto-split mode: grouping by 'dataset' column, "
+              f"max_samples={config.max_samples}/dataset")
+        benchmark_qa = _load_benchmark_qa(
+            config.unified_index_csv,
+            max_samples=config.max_samples,
+            seed=config.sample_seed,
+        )
+        # Wrap each group's QA pairs with few-shot handling
+        qa_groups = {}
+        for ds_name, qa_pairs in benchmark_qa.items():
+            few_shot = None
+            if config.prompt_strategy == "few_shot":
+                few_shot, qa_pairs = split_few_shot_examples(
+                    qa_pairs, n_examples=config.n_few_shot, seed=config.sample_seed,
+                )
+            qa_groups[ds_name] = (qa_pairs, few_shot)
 
-        qa_pairs, few_shot = _prepare_qa(config, csv_path)
-        print(f"  {len(qa_pairs)} QA pairs sampled")
+    # ── Evaluate each dataset ──────────────────────────────────────
+    all_results = []
+    for dataset_name, (qa_pairs, few_shot) in qa_groups.items():
+        out_dir = _output_dir(config, dataset_name)
+        print(f"[Unified] ── {dataset_name} ({len(qa_pairs)} samples) ──")
 
         # Retrieve + Generate
         questions = [qa["question"] for qa in qa_pairs]
-        print(f"  Retrieving {len(questions)}/{dataset_name} queries ({config.search_type})...")
+        print(f"  Retrieving {len(questions)} queries ({config.search_type})...")
         retrieval_results = retriever.batch_retrieve(questions)
         gen_results = _generate(config, retrieval_results, few_shot, retriever=retriever)
 
