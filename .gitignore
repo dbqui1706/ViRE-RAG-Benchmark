@@ -56,3 +56,12 @@ temp_*.py
 AGENTS.md
 benchmark/prepare_data.py
 benchmark/eda_benchmark.py
+
+J05__RAG_Evaluation/*
+NARRATIVE_REPORT.md
+PAPER_PLAN.md
+ViRE.code-workspace
+ViRE.code-workspace.code-workspace
+
+# Papers
+papers/
