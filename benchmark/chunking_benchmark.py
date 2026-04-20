@@ -8,9 +8,9 @@ Usage:
 """
 
 from __future__ import annotations
-from yaml import warnings
 
 import argparse
+import hashlib
 import json
 import random
 import sys
@@ -43,9 +43,10 @@ MAX_EVAL_SAMPLES = 500
 STRATEGIES = ["fixed", "sentence", "paragraph", "recursive", "semantic"]
 
 METRIC_KEYS = [
-    "hit_rate", "mrr", "context_precision", "context_recall",
+    "hit_rate", "mrr", "precision",
     "recall_at_1", "recall_at_3", "recall_at_5", "recall_at_10",
     "ndcg_at_1", "ndcg_at_3", "ndcg_at_5", "ndcg_at_10",
+    "map_at_1", "map_at_3", "map_at_5", "map_at_10",
 ]
 
 # Experiment configs
@@ -86,10 +87,16 @@ def load_benchmark_data(
     df = pd.read_csv(csv_path, encoding="utf-8")
     df["answer"] = df["answer"].fillna("")
 
+    # Compute context_id: md5 hash of context text (dedup-safe)
+    df["context_id"] = df["context"].apply(
+        lambda c: hashlib.md5(str(c).encode("utf-8")).hexdigest()[:12]
+    )
+
     unique_ctx = df.drop_duplicates(subset=["context"])
     all_docs = [
         Document(page_content=str(r["context"]),
-                 metadata={"dataset": str(r["dataset"])})
+                 metadata={"dataset": str(r["dataset"]),
+                           "context_id": str(r["context_id"])})
         for _, r in tqdm(unique_ctx.iterrows(), total=len(unique_ctx),
                          desc="Loading docs")
     ]
@@ -98,7 +105,8 @@ def load_benchmark_data(
     qa_by_dataset: dict[str, list[dict]] = {}
     for ds, group in df.groupby("dataset"):
         pairs = [
-            {k: str(r[k]) for k in ["question", "answer", "context", "dataset"]}
+            {"context_id": str(r["context_id"]), **{k: str(r[k])
+             for k in ["question", "answer", "context", "dataset"]}}
             for _, r in group.iterrows()
         ]
         if len(pairs) > max_eval:
@@ -142,13 +150,25 @@ def run_config(
                            model_key=config.label)
     retriever = DenseRetriever(vs, top_k=TOP_K)
 
+    # Pre-compute total relevant chunks per context_id (R for each query)
+    from collections import Counter
+    ctx_counts: dict[str, int] = Counter(
+        doc.metadata.get("context_id", "") for doc in chunks
+        if hasattr(doc, "metadata") and isinstance(doc.metadata, dict)
+    )
+
     # Evaluate per dataset
     per_dataset = {}
     for ds_name, qa_pairs in tqdm(qa_by_dataset.items(), desc="Evaluating"):
         questions = [qa["question"] for qa in qa_pairs]
         rr_list = retriever.batch_retrieve(questions)
-        scores = [evaluate_retrieval(rr.documents, qa["context"], k=TOP_K)
-                  for qa, rr in zip(qa_pairs, rr_list)]
+        scores = [
+            evaluate_retrieval(
+                rr.documents, gold_context_id=qa["context_id"], k=TOP_K,
+                n_relevant=ctx_counts.get(qa["context_id"], 1),
+            )
+            for qa, rr in zip(qa_pairs, rr_list)
+        ]
         per_dataset[ds_name] = {
             k: round(float(np.mean([s[k] for s in scores if s.get(k) is not None])), 4)
             for k in METRIC_KEYS
