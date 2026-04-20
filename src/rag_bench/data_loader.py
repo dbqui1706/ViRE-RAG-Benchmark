@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pandas as pd
@@ -63,17 +64,25 @@ def load_dataset(
     documents = []
     qa_pairs = []
     for _, row in df.iterrows():
+        ctx = str(row["context"])
+        # Stable context_id: same context text -> same id (dedup-safe)
+        context_id = hashlib.md5(ctx.encode("utf-8")).hexdigest()[:12]
         doc = Document(
-            page_content=str(row["context"]),
-            metadata={"qid": str(row["qid"]), "source": dataset_name},
+            page_content=ctx,
+            metadata={
+                "qid": str(row["qid"]),
+                "context_id": context_id,
+                "source": dataset_name,
+            },
         )
         documents.append(doc)
         qa_pairs.append(
             {
                 "qid": str(row["qid"]),
+                "context_id": context_id,
                 "question": str(row["question"]),
                 "answer": str(row["answer"]),  # may be ""
-                "context": str(row["context"]),
+                "context": ctx,
             }
         )
 
