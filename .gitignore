@@ -63,3 +63,7 @@ ViRE.code-workspace.code-workspace
 
 # Papers
 papers/
+
+# Scripts and Prompts
+scripts/
+.github/prompts/
