@@ -59,7 +59,7 @@ def test_unified_pipeline_runs(tiny_csvs, tmp_path):
             chroma_dir=str(tmp_path / "chroma"),
             max_samples=5,
             max_workers=1,
-            chunk_strategy="passthrough",
+            chunk_strategy="token",
             llm_api_key="test-key",
         )
         results = run_unified_pipeline(config, [str(csv_a), str(csv_b)])

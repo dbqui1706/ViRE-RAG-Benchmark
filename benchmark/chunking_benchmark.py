@@ -40,7 +40,7 @@ BENCHMARK_CSV = "data/processed/benchmark.csv"
 EMBED_MODEL_KEY = "multilingual-e5-large"
 TOP_K = 10
 MAX_EVAL_SAMPLES = 500
-STRATEGIES = ["fixed", "sentence", "paragraph", "recursive", "semantic"]
+STRATEGIES = ["token", "sentence", "paragraph", "recursive", "semantic", "neural"]
 
 METRIC_KEYS = [
     "hit_rate", "mrr", "precision",
@@ -69,11 +69,12 @@ EXPERIMENTS = {
         for ov in [0, 25, 50, 100, 200]
     ]),
     3: ("Method x Domain", [
-        ChunkingConfig("C1-512", "fixed", 512, 0),
+        ChunkingConfig("C1-512", "token", 512, 0),
         ChunkingConfig("C2-sentence", "sentence"),
         ChunkingConfig("C3-paragraph", "paragraph"),
         ChunkingConfig("C4-512", "recursive", 512, 50),
         ChunkingConfig("C5-semantic", "semantic"),
+        ChunkingConfig("C6-neural", "neural"),
     ]),
 }
 

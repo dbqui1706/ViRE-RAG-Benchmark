@@ -27,9 +27,7 @@ outputs/
 *.npy
 *.faiss
 *.chroma/
-data/raw/
-data/unified_vqa.csv
-
+data/
 # Jupyter
 .ipynb_checkpoints/
 **/.ipynb_checkpoints/

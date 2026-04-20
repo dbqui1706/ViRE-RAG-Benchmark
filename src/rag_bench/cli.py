@@ -60,9 +60,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # Chunking options
     parser.add_argument(
         "--chunk-strategy", default="recursive",
-        choices=["passthrough", "fixed", "sentence", "paragraph", "recursive", "semantic"],
-        help="Chunking strategy: passthrough, fixed, sentence (underthesea), "
-             "paragraph, recursive (default), or semantic",
+        choices=["token", "sentence", "paragraph", "recursive", "semantic", "neural"],
+        help="Chunking strategy: token, sentence (underthesea), "
+             "paragraph, recursive (default), semantic, or neural",
     )
     parser.add_argument("--chunk-size", type=int, default=256, help="Chunk size in tokens")
     parser.add_argument("--chunk-overlap", type=int, default=50, help="Chunk overlap in tokens")

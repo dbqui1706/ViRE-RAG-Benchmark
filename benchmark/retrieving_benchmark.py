@@ -1,9 +1,10 @@
 """Retrieval Benchmark — Evaluate retrieval strategies with fixed chunking.
 
 Fixed parameters:
-    Chunking: paragraph (best from chunking benchmark)
+    Chunking: paragraph (c* from RQ1)
     Embedding: multilingual-e5-large
     BM25/TF-IDF: word-level (underthesea)
+    Vectorstore: reuses RQ1 index from outputs/rq1_analysis/chroma/
 
 Usage:
     python benchmark/retrieving_benchmark.py --list
@@ -48,6 +49,11 @@ CHUNK_SIZE = 0
 CHUNK_OVERLAP = 0
 TOP_K = 10
 MAX_EVAL_SAMPLES = 500
+
+# RQ1 vectorstore location (reuse instead of rebuilding)
+RQ1_CHROMA_DIR = "outputs/rq1_analysis/chroma"
+RQ1_DATASET_NAME = "rq1_Paragraph"
+RQ1_MODEL_KEY = "Paragraph"
 
 METRIC_KEYS = [
     "hit_rate", "mrr", "precision",
@@ -318,8 +324,10 @@ def main():
     p.add_argument("--datasets", nargs="+", help="Filter to specific datasets")
     p.add_argument("--max-samples", type=int, default=MAX_EVAL_SAMPLES)
     p.add_argument("--output-dir", default="outputs/retrieval_benchmark")
+    p.add_argument("--rq1-chroma-dir", default=RQ1_CHROMA_DIR,
+                   help="Path to RQ1 chroma directory (default: %(default)s)")
     p.add_argument("--force", action="store_true",
-                   help="Ignore cache, rebuild index")
+                   help="Ignore cache for retrieval results")
     args = p.parse_args()
 
     if args.list:
@@ -349,30 +357,35 @@ def main():
     total_q = sum(len(v) for v in qa_by_dataset.values())
     print(f"  {len(all_docs)} docs, {len(qa_by_dataset)} datasets, {total_q} queries")
 
-    # Chunk (fixed: recursive 512/50)
+    # Chunk with c* = paragraph (needed for BM25/TF-IDF retriever)
     print(f"\nChunking: {CHUNK_STRATEGY} ({CHUNK_SIZE}/{CHUNK_OVERLAP})...")
     chunker = get_chunker(CHUNK_STRATEGY, chunk_size=CHUNK_SIZE,
                           chunk_overlap=CHUNK_OVERLAP)
     chunks = chunker.chunk(tqdm(all_docs, desc="Chunking"))
     print(f"  {len(all_docs)} docs -> {len(chunks)} chunks")
 
-    # Build vectorstore (shared across dense/hybrid strategies)
+    # Load existing vectorstore from RQ1 (skip embedding + indexing)
     print(f"\nLoading embedding model: {EMBED_MODEL_KEY}...")
     embed_model = get_embed_model(EMBED_MODEL_KEY)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    rq1_chroma = Path(args.rq1_chroma_dir)
+    if not rq1_chroma.exists():
+        sys.exit(f"ERROR: RQ1 chroma dir not found: {rq1_chroma}\n"
+                 f"Run rq1_chunking_analysis.py first, or use --rq1-chroma-dir.")
+
     rag_cfg = RagConfig(
         csv_path="unified", embed_model=EMBED_MODEL_KEY,
-        chroma_dir=str(output_dir / "chroma"),
-        force_reindex=args.force,
+        chroma_dir=str(rq1_chroma),
+        force_reindex=False,  # never rebuild — reuse only
     )
-    print("Building/loading vectorstore...")
+    print(f"Reusing RQ1 vectorstore from {rq1_chroma}...")
     vs = build_vectorstore(
         chunks, embed_model, rag_cfg,
-        dataset_name="retrieval_benchmark",
-        model_key=f"{CHUNK_STRATEGY}-{EMBED_MODEL_KEY}",
+        dataset_name=RQ1_DATASET_NAME,
+        model_key=RQ1_MODEL_KEY,
     )
 
     # Run each retrieval strategy
