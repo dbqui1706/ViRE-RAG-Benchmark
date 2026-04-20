@@ -80,7 +80,7 @@ def test_unified_pipeline_runs(tiny_csvs, tmp_path):
     assert gen_b["exact_match"] is None
 
     # Retrieval metrics present for both
-    assert "context_precision" in results[0]["retrieval_metrics"]
+    assert "precision" in results[0]["retrieval_metrics"]
     assert "hit_rate" in results[1]["retrieval_metrics"]
 
     # Output files exist

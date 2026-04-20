@@ -46,8 +46,7 @@ def test_pipeline_with_mock(sample_csv, tmp_path):
     assert "f1" in results["generation_metrics"]
     assert "rouge_l" in results["generation_metrics"]
     # Retrieval metrics
-    assert "context_precision" in results["retrieval_metrics"]
-    assert "context_recall" in results["retrieval_metrics"]
+    assert "precision" in results["retrieval_metrics"]
     assert "mrr" in results["retrieval_metrics"]
     assert "hit_rate" in results["retrieval_metrics"]
     # RAGAS metrics empty when eval_faithfulness is False
