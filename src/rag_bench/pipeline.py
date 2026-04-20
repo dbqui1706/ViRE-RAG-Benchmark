@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import random
@@ -45,6 +46,8 @@ def _build_retriever(config: RagConfig, vectorstore, docs: list):
         base_retriever = get_retriever(st, documents=docs, top_k=stage1_k)
     elif st == "hybrid":
         base_retriever = get_retriever("hybrid", vectorstore=vectorstore, documents=docs, top_k=stage1_k)
+    elif st == "hybrid_weighted":
+        base_retriever = get_retriever("hybrid_weighted", vectorstore=vectorstore, documents=docs, top_k=stage1_k)
     else:
         raise ValueError(f"Unknown search_type: '{st}'. Available: {list_strategies()}")
 
@@ -158,11 +161,14 @@ def _load_benchmark_qa(
     for ds_name, group in df.groupby("dataset"):
         pairs = []
         for idx, (_, row) in enumerate(group.iterrows()):
+            ctx = str(row["context"])
+            context_id = hashlib.md5(ctx.encode("utf-8")).hexdigest()[:12]
             pairs.append({
                 "qid": str(row.get("qid", idx)),
+                "context_id": context_id,
                 "question": str(row["question"]),
                 "answer": str(row["answer"]),
-                "context": str(row["context"]),
+                "context": ctx,
             })
         if len(pairs) > max_samples:
             pairs = rng.sample(pairs, max_samples)
@@ -234,6 +240,7 @@ def _build_generations(qa_pairs, retrieval_results, gen_results):
         gen = gen_results[i]
         entry = {
             "qid": qa["qid"],
+            "context_id": qa.get("context_id", ""),
             "question": qa["question"],
             "gold_answer": qa["answer"],
             "predicted_answer": gen.text,
@@ -261,12 +268,32 @@ def _save_generations(generations: list[dict], out_dir: Path) -> Path:
 
 
 def _evaluate(config: RagConfig, generations: list[dict],
-              qa_pairs: list[dict], dataset_name: str = "") -> dict:
-    """Run evaluation (lexical + optional RAGAS) and return evaluations dict."""
+              qa_pairs: list[dict], retrieval_results: list[RetrievalResult],
+              dataset_name: str = "", chunks: list | None = None) -> dict:
+    """Run evaluation (lexical + optional RAGAS) and return evaluations dict.
+
+    Retrieval metrics use context_id-based index matching (aligned with ViRE).
+    Each retrieved Document's ``metadata["context_id"]`` is compared against the
+    gold context_id from the QA pair.
+
+    When *chunks* is provided, n_relevant is pre-computed per context_id so that
+    Recall, NDCG, and MAP use the true corpus-level R (matching
+    ``retrieving_benchmark.py``).  Without chunks, R falls back to hits in top-K.
+    """
     label = f"Evaluating {dataset_name}" if dataset_name else "Evaluating"
 
+    # Pre-compute n_relevant per context_id from the chunked corpus
+    ctx_counts: dict[str, int] = {}
+    if chunks:
+        from collections import Counter
+        ctx_counts = Counter(
+            doc.metadata.get("context_id", "")
+            for doc in chunks
+            if hasattr(doc, "metadata") and isinstance(doc.metadata, dict)
+        )
+
     per_query_eval = []
-    for g in tqdm(generations, desc=label):
+    for i, g in enumerate(tqdm(generations, desc=label)):
         has_gold = bool(g["gold_answer"].strip())
         gen_scores = (
             evaluate_answer(
@@ -276,8 +303,13 @@ def _evaluate(config: RagConfig, generations: list[dict],
             if has_gold
             else {"exact_match": None, "f1": None, "rouge_l": None}
         )
-        qa_context = next(qa["context"] for qa in qa_pairs if qa["qid"] == g["qid"])
-        ret_scores = evaluate_retrieval(g["retrieved_contexts"], qa_context, k=config.top_k)
+        # Index-based retrieval evaluation: use Document objects with context_id
+        ret_docs = retrieval_results[i].documents
+        gold_ctx_id = g["context_id"]
+        n_rel = ctx_counts.get(gold_ctx_id) if ctx_counts else None
+        ret_scores = evaluate_retrieval(
+            ret_docs, gold_context_id=gold_ctx_id, k=config.top_k, n_relevant=n_rel,
+        )
         per_query_eval.append({
             "qid": g["qid"],
             "generation_scores": gen_scores,
@@ -317,9 +349,12 @@ def _evaluate(config: RagConfig, generations: list[dict],
         "retrieval_metrics": {
             k: _avg(k, "retrieval_scores")
             for k in [
-                "context_precision", "context_recall", "mrr", "hit_rate",
+                "precision", "mrr", "hit_rate",
                 "recall_at_1", "recall_at_3", "recall_at_5", "recall_at_10",
                 "ndcg_at_1", "ndcg_at_3", "ndcg_at_5", "ndcg_at_10",
+                "map_at_1", "map_at_3", "map_at_5", "map_at_10",
+                "mrr_at_1", "mrr_at_3", "mrr_at_5", "mrr_at_10",
+                "first_relevant_rank",
             ]
         },
         "ragas_metrics": ragas_metrics,
@@ -381,10 +416,10 @@ def _print_summary(metrics: dict):
         f"F1={_fmt(gm.get('f1'))}  ROUGE-L={_fmt(gm.get('rouge_l'))}"
     )
     print(
-        f"  Ret: P={_fmt(rm.get('context_precision'))}  "
-        f"R={_fmt(rm.get('context_recall'))}  "
+        f"  Ret: P={_fmt(rm.get('precision'))}  "
         f"MRR={_fmt(rm.get('mrr'))}  Hit={_fmt(rm.get('hit_rate'))}  "
-        f"R@5={_fmt(rm.get('recall_at_5'))}  NDCG@5={_fmt(rm.get('ndcg_at_5'))}"
+        f"R@5={_fmt(rm.get('recall_at_5'))}  NDCG@5={_fmt(rm.get('ndcg_at_5'))}  "
+        f"MAP@5={_fmt(rm.get('map_at_5'))}"
     )
     print(f"  Latency: {lat['mean_total_ms']:.0f}ms avg")
 
@@ -473,7 +508,9 @@ def run_pipeline(config: RagConfig) -> dict:
     print(f"  Generations -> {gen_path}")
 
     # Evaluate + Save
-    metrics = _evaluate(config, generations, qa_pairs, dataset_name)
+    metrics = _evaluate(
+        config, generations, qa_pairs, retrieval_results, dataset_name, chunks=docs,
+    )
     evaluations = _save_evaluations(config, metrics, out_dir, dataset_name)
     _print_summary(metrics)
 
@@ -542,7 +579,9 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
         print(f"  Generations -> {gen_path}")
 
         # Evaluate + Save
-        metrics = _evaluate(config, generations, qa_pairs, dataset_name)
+        metrics = _evaluate(
+            config, generations, qa_pairs, retrieval_results, dataset_name, chunks=docs,
+        )
         evaluations = _save_evaluations(config, metrics, out_dir, dataset_name, "unified")
         _print_summary(metrics)
         all_results.append(evaluations)
