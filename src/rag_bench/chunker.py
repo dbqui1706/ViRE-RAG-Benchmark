@@ -98,7 +98,7 @@ class SemanticChunker:
         from langchain_experimental.text_splitter import SemanticChunker as _SC
         from langchain_huggingface import HuggingFaceEmbeddings
         import torch
-
+        print(f"Loading embedding model: {embed_model}")
         embed = HuggingFaceEmbeddings(
             model_name=embed_model,
             model_kwargs={"device": "cuda" if torch.cuda.is_available() else "cpu"},

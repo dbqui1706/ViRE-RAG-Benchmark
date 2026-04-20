@@ -65,6 +65,9 @@ def build_vectorstore(
         )
     else:
         # Build new index
+        print(f"    [BUILD] Building new index: {col_name} "
+              f"({len(documents)} documents)")
+
         vectorstore = Chroma.from_documents(
             documents,
             embedding=embed_model,
