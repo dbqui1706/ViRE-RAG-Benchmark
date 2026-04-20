@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import math
-
 import asyncio
+import math
 import re
 import string
 from collections import Counter
@@ -99,162 +98,186 @@ def evaluate_answer(prediction: str, gold: str, include_semantic: bool = False) 
 
 # Section 2: Retrieval Quality
 
-def context_overlap(retrieved_text: str, gold_context: str) -> float:
-    """Compute bidirectional token overlap between retrieved text and gold context.
-
-    Uses max of both directions to handle chunked retrieval:
-    - forward:  sum(min_counts) / total_gold_tokens  (gold coverage)
-    - backward: sum(min_counts) / total_ret_tokens   (chunk precision)
-
-    Returns:
-        Max overlap ratio (0.0 to 1.0)
-    """
-    ret_tokens = _normalize(retrieved_text).split()
-    gold_tokens = _normalize(gold_context).split()
-    if not gold_tokens or not ret_tokens:
-        return 0.0
-    common = Counter(ret_tokens) & Counter(gold_tokens)
-    num_common = sum(common.values())
-    if num_common == 0:
-        return 0.0
-    forward = num_common / len(gold_tokens)
-    backward = num_common / len(ret_tokens)
-    return max(forward, backward)
-
-
-def context_match(retrieved_text: str, gold_context: str, threshold: float = 0.5) -> bool:
-    """Check if gold context is substantially contained in retrieved text.
-
-    Args:
-        retrieved_text: Text from a retrieved document.
-        gold_context: Gold-standard context from dataset.
-        threshold: Minimum overlap ratio to consider a match (default: 0.5).
-
-    Returns:
-        True if overlap ratio >= threshold.
-    """
-    return context_overlap(retrieved_text, gold_context) >= threshold
-
-
 # Multi-K evaluation depths
 _EVAL_K_VALUES = [1, 3, 5, 10]
 
 
-def recall_at_k(matches: list[bool], k: int) -> float:
-    """Recall@K with single-relevance ground truth.
+def recall_at_k(matches: list[bool], k: int, n_relevant: int = 1) -> float:
+    """Recall@K: fraction of relevant documents found in top-K.
 
-    Returns 1.0 if any of the top-K chunks match, else 0.0.
-    """
-    return 1.0 if any(matches[:k]) else 0.0
-
-
-def ndcg_at_k(matches: list[bool], k: int) -> float:
-    """NDCG@K with binary relevance.
-
-    Computes IDCG based on the actual number of relevant documents
-    (multiple chunks can match the same gold context after chunking).
+    Formula: Recall@K = |relevant ∩ top-K| / R
 
     Args:
         matches: Boolean list — True if chunk at that rank is relevant.
         k: Evaluation depth.
+        n_relevant: Total number of relevant documents (R).
+
+    Returns:
+        Recall score between 0.0 and 1.0.
+    """
+    if n_relevant <= 0:
+        return 0.0
+    hits = sum(1 for m in matches[:k] if m)
+    return hits / n_relevant
+
+
+def ndcg_at_k(matches: list[bool], k: int, n_relevant: int = 1) -> float:
+    """NDCG@K with binary relevance.
+
+    IDCG is computed using the total number of relevant documents (R),
+    not just those found within top-K.  This properly penalises rankings
+    that miss relevant documents.
+
+    Formula: NDCG@k = DCG@k / IDCG@k
+    DCG@k  = sum_{i=1}^{k} (rel_i / log2(i+1))
+    IDCG@k = sum_{i=1}^{min(R,k)} (1 / log2(i+1))
+
+    Args:
+        matches: Boolean list — True if chunk at that rank is relevant.
+        k: Evaluation depth.
+        n_relevant: Total number of relevant documents (R) in the corpus.
 
     Returns:
         NDCG score between 0.0 and 1.0.
     """
+    if n_relevant <= 0:
+        return 0.0
     dcg = sum(
         (1.0 / math.log2(i + 2)) for i, m in enumerate(matches[:k]) if m
     )
-    # IDCG: ideal ranking puts all relevant docs at top positions
-    n_rel = sum(matches[:k])
-    if n_rel == 0:
+    if dcg == 0.0:
         return 0.0
-    idcg = sum(1.0 / math.log2(i + 2) for i in range(n_rel))
+    # IDCG: ideal ranking puts min(R, k) relevant docs at top positions
+    ideal_count = min(n_relevant, k)
+    idcg = sum(1.0 / math.log2(i + 2) for i in range(ideal_count))
     return dcg / idcg
 
 
-def evaluate_retrieval(documents: list[Any], gold_context: str, k: int = 5) -> dict:
-    """Evaluate retrieval quality by comparing retrieved documents to gold context.
+def map_at_k(matches: list[bool], k: int, n_relevant: int = 1) -> float:
+    """Average Precision@K.
+
+    AP@K = (1 / min(R, K)) * sum_{i=1}^{K} (rel_i * Precision@i)
 
     Args:
-        documents: List of LangChain Documents.
-        gold_context: The gold-standard context from the dataset.
-        k: Top-K to evaluate against.
+        matches: Boolean list — True if chunk at that rank is relevant.
+        k: Evaluation depth.
+        n_relevant: Total number of relevant documents (R).
 
     Returns:
-        Dict with context_precision, context_recall, mrr, hit_rate,
-        best_overlap, and recall_at_k / ndcg_at_k for k in {1,3,5,10}.
+        AP score between 0.0 and 1.0.
     """
-    texts = []
-    for doc in documents[:k]:
-        if hasattr(doc, "page_content"):
-            texts.append(doc.page_content)
-        else:
-            texts.append(str(doc))
+    if n_relevant <= 0 or k <= 0:
+        return 0.0
+    denom = min(n_relevant, k)
+    running_hits = 0.0
+    ap_sum = 0.0
+    for i, m in enumerate(matches[:k]):
+        if m:
+            running_hits += 1.0
+            ap_sum += running_hits / (i + 1)
+    return ap_sum / denom
 
-    if not texts:
-        zero_dict = {
-            "context_precision": 0.0,
-            "context_recall": 0.0,
+
+def evaluate_retrieval(
+    documents: list[Any],
+    gold_context_id: str,
+    k: int = 5,
+    n_relevant: int | None = None,
+) -> dict:
+    """Evaluate retrieval quality using index-based matching (aligned with ViRE).
+
+    Relevance is determined by comparing each retrieved chunk's
+    ``context_id`` metadata against ``gold_context_id``.  This avoids the
+    noise of text-overlap heuristics and is consistent with the original
+    ViRE evaluation methodology which uses known document indices.
+
+    Metrics:
+    - Precision@K: fraction of relevant in top-K
+    - Recall@K: continuous, hits_in_topk / R
+    - NDCG@K: uses R for IDCG (total relevant in corpus)
+    - MAP@K: Average Precision at K, denominator min(R, K)
+    - MRR@K: K-aware (0 if first relevant rank > K)
+    - HitRate@K: binary indicator
+    - first_relevant_rank: 1-indexed rank of first relevant doc
+
+    Args:
+        documents: List of LangChain Documents (with ``metadata["context_id"]``).
+        gold_context_id: The context_id of the gold-standard context.
+        k: Top-K to evaluate against.
+        n_relevant: Total number of relevant chunks in the *entire* corpus
+            for this query.  When provided, Recall/NDCG/MAP use this as R;
+            when ``None``, R is counted from the retrieved top-K only.
+
+    Returns:
+        Dict with precision, mrr, hit_rate, first_relevant_rank,
+        and recall_at_k / ndcg_at_k / map_at_k / mrr_at_k for k in {1,3,5,10}.
+    """
+    if not documents:
+        zero_dict: dict[str, float] = {
+            "precision": 0.0,
             "mrr": 0.0,
             "hit_rate": 0.0,
-            "best_overlap": 0.0,
-            "combined_overlap": 0.0,
+            "first_relevant_rank": float("inf"),
         }
         for k_val in _EVAL_K_VALUES:
             zero_dict[f"recall_at_{k_val}"] = 0.0
             zero_dict[f"ndcg_at_{k_val}"] = 0.0
+            zero_dict[f"map_at_{k_val}"] = 0.0
+            zero_dict[f"mrr_at_{k_val}"] = 0.0
         return zero_dict
 
-    # Per-chunk bidirectional overlap (Counter-based)
-    overlaps = [context_overlap(text, gold_context) for text in texts]
-    matches = [o >= 0.5 for o in overlaps]
+    # Determine relevance by matching context_id metadata
+    docs_top_k = documents[:k]
+    matches: list[bool] = []
+    for doc in docs_top_k:
+        doc_ctx_id = None
+        if hasattr(doc, "metadata") and isinstance(doc.metadata, dict):
+            doc_ctx_id = str(doc.metadata.get("context_id", ""))
+        matches.append(doc_ctx_id == gold_context_id)
 
-    # Combined overlap: concatenate all chunks → multiset overlap with gold
-    combined_text = " ".join(texts)
-    combined_ret_counter = Counter(_normalize(combined_text).split())
-    gold_counter = Counter(_normalize(gold_context).split())
-    gold_total = sum(gold_counter.values())
-    if gold_total > 0:
-        common = combined_ret_counter & gold_counter
-        combined_overlap = sum(common.values()) / gold_total
-    else:
-        combined_overlap = 0.0
+    # R = total relevant in corpus (if given), else fall back to top-K count
+    hits_in_topk = sum(matches)
+    R = n_relevant if n_relevant is not None else hits_in_topk
 
-    # Context Precision@K: fraction of retrieved docs that match
-    context_precision = sum(matches) / len(matches)
-
-    # Context Recall (continuous): token-level coverage of gold by all chunks
-    context_recall = combined_overlap
-
-    # MRR: 1 / rank of first relevant (1-indexed)
-    mrr = 0.0
+    # First relevant rank (1-indexed); inf if no match found
+    first_rel_rank = float("inf")
     for i, m in enumerate(matches):
         if m:
-            mrr = 1.0 / (i + 1)
+            first_rel_rank = float(i + 1)
             break
 
-    # Hit Rate@K: 1.0 if any chunk matches, else 0.0 (binary)
-    hit_rate = 1.0 if any(matches) else 0.0
+    # MRR (backward-compatible): 1 / first_relevant_rank
+    mrr = (1.0 / first_rel_rank) if math.isfinite(first_rel_rank) else 0.0
 
-    # Best overlap: highest overlap score among individual chunks
-    best_overlap = max(overlaps)
+    # Precision@K: fraction of retrieved docs that are relevant
+    precision = hits_in_topk / len(matches) if matches else 0.0
 
-    result_dict = {
-        "context_precision": context_precision,
-        "context_recall": context_recall,
+    # Hit Rate@K: 1.0 if any chunk matches, else 0.0
+    hit_rate = 1.0 if hits_in_topk > 0 else 0.0
+
+    result_dict: dict[str, float] = {
+        "precision": precision,
         "mrr": mrr,
         "hit_rate": hit_rate,
-        "best_overlap": best_overlap,
-        "combined_overlap": combined_overlap,
+        "first_relevant_rank": first_rel_rank,
     }
 
     # Multi-K metrics (pad matches to handle k_val > len(matches))
     for k_val in _EVAL_K_VALUES:
         padded = matches + [False] * max(0, k_val - len(matches))
-        result_dict[f"recall_at_{k_val}"] = recall_at_k(padded, k_val)
-        result_dict[f"ndcg_at_{k_val}"] = ndcg_at_k(padded, k_val)
+        result_dict[f"recall_at_{k_val}"] = recall_at_k(padded, k_val, R)
+        result_dict[f"ndcg_at_{k_val}"] = ndcg_at_k(padded, k_val, R)
+        result_dict[f"map_at_{k_val}"] = map_at_k(padded, k_val, R)
+
+        # MRR@K: K-aware — 0 if first relevant rank > K
+        kk = min(k_val, len(padded))
+        mrr_k = (1.0 / first_rel_rank) if (
+            math.isfinite(first_rel_rank) and first_rel_rank <= kk
+        ) else 0.0
+        result_dict[f"mrr_at_{k_val}"] = mrr_k
 
     return result_dict
+
 
 
 # Section 3: RAGAS Evaluation (LLM-based metrics)
