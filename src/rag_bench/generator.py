@@ -119,6 +119,7 @@ class OpenAIGenerator:
             openai_api_key=api_key,
             max_tokens=max_tokens,
             temperature=temperature,
+            max_retries=3,
         )
         if base_url:
             kwargs["openai_api_base"] = base_url
@@ -153,7 +154,7 @@ class OpenAIGenerator:
     def batch_generate(
         self,
         items: list[dict],
-        max_workers: int = 5,
+        max_workers: int = 1,
     ) -> list[GenerationResult]:
         """Batch generation using LangChain .batch() with concurrency control."""
         inputs = [

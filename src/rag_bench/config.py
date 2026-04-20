@@ -28,7 +28,7 @@ class RagConfig:
     chunk_size: int = 256
     chunk_overlap: int = 50
     # Batch generation
-    max_workers: int = 5
+    max_workers: int = 2
     # Prompt strategy
     prompt_strategy: str = "zero_shot"  # "zero_shot" or "few_shot"
     n_few_shot: int = 3  # Number of few-shot examples (auto-selected from dataset)
