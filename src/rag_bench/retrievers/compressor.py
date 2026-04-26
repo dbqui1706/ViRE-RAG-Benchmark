@@ -67,28 +67,6 @@ class ContextualCompressor(BaseRetriever):
         self.prompt = self._build_prompt()
         self.chain = self.prompt | self.llm
 
-    def _compress_doc(self, query: str, doc: Document) -> Document | None:
-        """Compress one document and fall back gracefully on truncated output."""
-        try:
-            resp = self.chain.invoke({
-                "question": query,
-                "passage": doc.page_content,
-            })
-        except LengthFinishReasonError:
-            if not self._warned_length_limit:
-                print(
-                    "Warning: Compressor output hit max_tokens; "
-                    "falling back to original chunks for truncated responses. "
-                    "Increase --compress-max-tokens to reduce this."
-                )
-                self._warned_length_limit = True
-            return Document(page_content=doc.page_content, metadata=doc.metadata)
-
-        text = getattr(resp, "compressed_text", "").strip()
-        if not text:
-            return None
-        return Document(page_content=text, metadata=doc.metadata)
-
     def _build_prompt(self) -> ChatPromptTemplate:
         from langchain_core.prompts import (
             HumanMessagePromptTemplate,
@@ -106,16 +84,38 @@ class ContextualCompressor(BaseRetriever):
 
         return ChatPromptTemplate.from_messages([system_prompt_template, human_prompt_template])
 
-    def retrieve(self, query: str) -> list[Document]:
+    def retrieve(self, query: str, max_concurrency: int = 5) -> list[Document]:
         docs = self.base.retrieve(query)
 
         if not docs:
             return []
 
+        inputs = [{"question": query, "passage": doc.page_content} for doc in docs]
+        responses = self.chain.batch(
+            inputs,
+            config={"max_concurrency": max_concurrency},
+            return_exceptions=True,
+        )
+
         compressed = []
-        for doc in docs:
-            compressed_doc = self._compress_doc(query, doc)
-            if compressed_doc is not None:
-                compressed.append(compressed_doc)
+        for doc, resp in zip(docs, responses):
+            if isinstance(resp, LengthFinishReasonError):
+                if not self._warned_length_limit:
+                    print(
+                        "Warning: Compressor output hit max_tokens; "
+                        "falling back to original chunks for truncated responses. "
+                        "Increase --compress-max-tokens to reduce this."
+                    )
+                    self._warned_length_limit = True
+                compressed.append(Document(page_content=doc.page_content, metadata=doc.metadata))
+                continue
+
+            if isinstance(resp, Exception):
+                # Unexpected error — skip this chunk silently
+                continue
+
+            text = getattr(resp, "compressed_text", "").strip()
+            if text:
+                compressed.append(Document(page_content=text, metadata=doc.metadata))
 
         return compressed[:self._top_k]
