@@ -44,16 +44,16 @@ from rag_bench.indexer import build_vectorstore
 SEED = 42
 BENCHMARK_CSV = "data/processed/benchmark.csv"
 EMBED_MODEL_KEY = "multilingual-e5-large" # namdp-ptit/ViDense, bkai-foundation-models/vietnamese-bi-encoder
-CHUNK_STRATEGY = "paragraph"
-CHUNK_SIZE = 0
-CHUNK_OVERLAP = 0
+CHUNK_STRATEGY = "sentence"
+CHUNK_SIZE = 512
+CHUNK_OVERLAP = 128
 TOP_K = 10
 MAX_EVAL_SAMPLES = 500
 
 # RQ1 vectorstore location (reuse instead of rebuilding)
 RQ1_CHROMA_DIR = "outputs/rq1_analysis/chroma"
-RQ1_DATASET_NAME = "rq1_Paragraph"
-RQ1_MODEL_KEY = "Paragraph"
+RQ1_DATASET_NAME = "rq1_Sentence"
+RQ1_MODEL_KEY = "Sentence"
 
 METRIC_KEYS = [
     "hit_rate", "mrr", "precision",
