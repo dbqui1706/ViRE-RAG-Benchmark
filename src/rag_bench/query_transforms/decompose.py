@@ -12,12 +12,12 @@ import os
 @register("decompose")
 def _factory(**kwargs) -> DecomposeTransformer:
     llm_model = kwargs.get("llm_model", "gpt-4o-mini")
-    base_url = os.environ.get("FPT_BASE_URL") or os.environ.get("LLM_BASE_URL", "https://mkp-api.fptcloud.com")
-    api_key = os.environ.get("FPT_API_KEY") or kwargs.get("api_key", "")
+    base_url = kwargs.get("base_url") or ""
+    api_key = kwargs.get("api_key", "")
     max_sub_questions = kwargs.get("max_sub_questions", 3)
 
     if not api_key:
-        print("Warning: API Key is not set. Please set FPT_API_KEY environment variable.")
+        print("Warning: API Key is not set.")
 
     return DecomposeTransformer(
         llm_model=llm_model, base_url=base_url, api_key=api_key,
@@ -42,7 +42,7 @@ class DecomposeTransformer(QueryTransformer):
         chat_kwargs = {
             "model": llm_model,
             "temperature": 0.0,
-            "max_tokens": 128,
+            "max_tokens": 512,
         }
         if api_key:
             chat_kwargs["openai_api_key"] = api_key
@@ -54,20 +54,19 @@ class DecomposeTransformer(QueryTransformer):
         self.prompt = self._build_prompt()
         self.chain = self.prompt | self.llm
 
-    def batch_transform(self, queries: list[str]) -> list[list[str]]:
+    def batch_transform(self, queries: list[str], max_concurrency: int = 5) -> list[list[str]]:
+        from .base import BatchProgressCallback
+        cb = BatchProgressCallback(len(queries), desc="Decomposing queries")
+        inputs = [{"question": q, "max_sub": self.max_sub} for q in queries]
+        responses = self.chain.batch(
+            inputs,
+            config={"max_concurrency": max_concurrency, "callbacks": [cb]},
+        )
+        cb.close()
         results = []
-        for q in tqdm(queries, desc="Decomposing queries"):
-            resp = self.chain.invoke({
-                "question": q,
-                "max_sub": self.max_sub,
-            })
-            
-            # `resp` is now an instance of DecomposedQuestions
-            # Filter empty strings and limit to max_sub
+        for q, resp in zip(queries, responses):
             valid_questions = [sq.strip() for sq in resp.questions if sq.strip()]
             sub_questions = valid_questions[:self.max_sub]
-            
-            # Original question first, then sub-questions
             results.append([q] + sub_questions)
         return results
 
