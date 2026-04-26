@@ -35,8 +35,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--llm-model", default="gpt-4o-mini", help="LLM model name (default: gpt-4o-mini)"
     )
     parser.add_argument(
-        "--llm-base-url", default="",
-        help="Custom API base URL (empty = OpenAI default; set for FPT/other)",
+        "--llm-base-url", default=None,
+        help="Custom API base URL (default: from LLM_BASE_URL env; empty = OpenAI default)",
     )
     parser.add_argument(
         "--top-k", type=int, default=5, help="Top-K documents to retrieve"
@@ -132,6 +132,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--compress", action="store_true",
         help="Enable Contextual Compression (A6) — LLM compresses each chunk to query-relevant content",
     )
+    parser.add_argument(
+        "--compress-max-tokens", type=int, default=128,
+        help="Max tokens for contextual compression responses (default: 128)",
+    )
     # Generation strategy
     parser.add_argument(
         "--generation-strategy", default="standard",
@@ -167,7 +171,7 @@ def main(argv: list[str] | None = None) -> None:
                 csv_path=args.unified_csv,  # use unified csv as source
                 embed_model=model_key,
                 llm_model=args.llm_model,
-                llm_base_url=args.llm_base_url,
+                **(dict(llm_base_url=args.llm_base_url) if args.llm_base_url is not None else {}),
                 top_k=args.top_k,
                 max_samples=args.max_samples,
                 sample_seed=args.seed,
@@ -191,6 +195,7 @@ def main(argv: list[str] | None = None) -> None:
                 rerank=args.rerank,
                 corrective=args.corrective,
                 compress=args.compress,
+                compress_max_tokens=args.compress_max_tokens,
                 search_type=args.search_type,
                 generation_strategy=args.generation_strategy,
                 self_rag_max_iter=args.self_rag_max_iter,
@@ -208,7 +213,7 @@ def main(argv: list[str] | None = None) -> None:
             csv_path=args.csv,
             embed_model=model_key,
             llm_model=args.llm_model,
-            llm_base_url=args.llm_base_url,
+            **(dict(llm_base_url=args.llm_base_url) if args.llm_base_url is not None else {}),
             top_k=args.top_k,
             max_samples=args.max_samples,
             sample_seed=args.seed,
@@ -231,6 +236,7 @@ def main(argv: list[str] | None = None) -> None:
             rerank=args.rerank,
             corrective=args.corrective,
             compress=args.compress,
+            compress_max_tokens=args.compress_max_tokens,
             search_type=args.search_type,
             generation_strategy=args.generation_strategy,
             self_rag_max_iter=args.self_rag_max_iter,
