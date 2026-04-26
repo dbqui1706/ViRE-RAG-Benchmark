@@ -1,11 +1,10 @@
 """A6 Contextual Compression — Post-retrieval chunk compression."""
 from __future__ import annotations
 
-import os
-
 from langchain_core.documents import Document
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+from openai import LengthFinishReasonError
 from pydantic import BaseModel, Field
 
 from . import register
@@ -22,10 +21,8 @@ class CompressedChunk(BaseModel):
 @register("compressor")
 def _factory(base_retriever: BaseRetriever, **kwargs) -> ContextualCompressor:
     llm_model = kwargs.get("model", "gpt-4o-mini")
-    base_url = os.environ.get("FPT_BASE_URL") or os.environ.get(
-        "LLM_BASE_URL", "https://mkp-api.fptcloud.com"
-    )
-    api_key = os.environ.get("FPT_API_KEY") or kwargs.get("api_key", "")
+    base_url = kwargs.get("base_url") or ""
+    api_key = kwargs.get("api_key", "")
     top_k = kwargs.get("top_k", 5)
     compress_max_tokens = kwargs.get("compress_max_tokens", 128)
 
@@ -52,6 +49,7 @@ class ContextualCompressor(BaseRetriever):
     ):
         self.base = base_retriever
         self._top_k = top_k
+        self._warned_length_limit = False
 
         print(f"LLM Model (Compressor): {llm_model}, Base URL: {base_url}")
 
@@ -69,9 +67,32 @@ class ContextualCompressor(BaseRetriever):
         self.prompt = self._build_prompt()
         self.chain = self.prompt | self.llm
 
+    def _compress_doc(self, query: str, doc: Document) -> Document | None:
+        """Compress one document and fall back gracefully on truncated output."""
+        try:
+            resp = self.chain.invoke({
+                "question": query,
+                "passage": doc.page_content,
+            })
+        except LengthFinishReasonError:
+            if not self._warned_length_limit:
+                print(
+                    "Warning: Compressor output hit max_tokens; "
+                    "falling back to original chunks for truncated responses. "
+                    "Increase --compress-max-tokens to reduce this."
+                )
+                self._warned_length_limit = True
+            return Document(page_content=doc.page_content, metadata=doc.metadata)
+
+        text = getattr(resp, "compressed_text", "").strip()
+        if not text:
+            return None
+        return Document(page_content=text, metadata=doc.metadata)
+
     def _build_prompt(self) -> ChatPromptTemplate:
         from langchain_core.prompts import (
-            SystemMessagePromptTemplate, HumanMessagePromptTemplate,
+            HumanMessagePromptTemplate,
+            SystemMessagePromptTemplate,
         )
 
         system_prompt_template = SystemMessagePromptTemplate.from_template(
@@ -93,18 +114,8 @@ class ContextualCompressor(BaseRetriever):
 
         compressed = []
         for doc in docs:
-            resp = self.chain.invoke({
-                "question": query,
-                "passage": doc.page_content,
-            })
-
-            text = getattr(resp, "compressed_text", "").strip()
-            if text:
-                compressed.append(
-                    Document(page_content=text, metadata=doc.metadata)
-                )
+            compressed_doc = self._compress_doc(query, doc)
+            if compressed_doc is not None:
+                compressed.append(compressed_doc)
 
         return compressed[:self._top_k]
-
-    def batch_retrieve(self, queries: list[str]) -> list[list[Document]]:
-        return [self.retrieve(q) for q in queries]

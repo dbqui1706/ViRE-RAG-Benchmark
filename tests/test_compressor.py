@@ -1,7 +1,10 @@
 """Tests for A6 Contextual Compression — ContextualCompressor."""
-import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
 from langchain_core.documents import Document
+from openai import LengthFinishReasonError
 
 from rag_bench.retrievers import get_retriever
 from rag_bench.retrievers.base import BaseRetriever
@@ -120,5 +123,21 @@ class TestCompressorBehavior:
         result = compressor.batch_retrieve(["query1", "query2"])
 
         assert len(result) == 2
-        assert len(result[0]) == 2
-        assert len(result[1]) == 2
+        assert len(result[0].documents) == 2
+        assert len(result[1].documents) == 2
+
+    def test_length_limited_compression_falls_back_to_original_chunk(self, compressor, docs):
+        """Truncated structured output should not abort retrieval for the whole query."""
+        compressor.chain.invoke.side_effect = [
+            LengthFinishReasonError(completion=SimpleNamespace(usage=None)),
+            MockCompressResponse(compressed_text=""),
+            MockCompressResponse(compressed_text="Compressed text 2"),
+        ]
+
+        result = compressor.retrieve("test query")
+
+        assert len(result) == 2
+        assert result[0].page_content == docs[0].page_content
+        assert result[0].metadata == docs[0].metadata
+        assert result[1].page_content == "Compressed text 2"
+        assert result[1].metadata == docs[2].metadata
