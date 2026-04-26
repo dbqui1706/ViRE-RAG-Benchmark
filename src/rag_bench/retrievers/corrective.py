@@ -25,8 +25,8 @@ class GradeResponse(BaseModel):
 @register("corrective")
 def _factory(base_retriever: BaseRetriever, **kwargs) -> CorrectiveRetriever:
     llm_model = kwargs.get("model", "gpt-4o-mini")
-    base_url = os.environ.get("FPT_BASE_URL") or os.environ.get("LLM_BASE_URL", "https://mkp-api.fptcloud.com")
-    api_key = os.environ.get("FPT_API_KEY") or kwargs.get("api_key", "")
+    base_url = kwargs.get("base_url") or ""
+    api_key = kwargs.get("api_key", "")
     top_k = kwargs.get("top_k", 5)
 
     if not api_key:
@@ -117,5 +117,3 @@ class CorrectiveRetriever(BaseRetriever):
 
         return graded_docs[:self._top_k]
 
-    def batch_retrieve(self, queries: list[str]) -> list[list[Document]]:
-        return [self.retrieve(q) for q in queries]
