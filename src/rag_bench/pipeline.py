@@ -88,6 +88,7 @@ def _build_retriever(config: RagConfig, vectorstore, docs: list):
             base_retriever=base_retriever,
             model=config.transform_llm_model,  # reuse transform model (gpt-4o-mini usually)
             api_key=config.llm_api_key,
+            base_url=config.llm_base_url or None,
             top_k=config.top_k,
         )
 
@@ -99,6 +100,7 @@ def _build_retriever(config: RagConfig, vectorstore, docs: list):
             base_retriever=base_retriever,
             model=config.transform_llm_model,
             api_key=config.llm_api_key,
+            base_url=config.llm_base_url or None,
             top_k=config.top_k,
             compress_max_tokens=config.compress_max_tokens,
         )
@@ -391,6 +393,7 @@ def _save_evaluations(config: RagConfig, metrics: dict, out_dir: Path,
             "rerank": config.rerank,
             "corrective": config.corrective,
             "compress": config.compress,
+            "compress_max_tokens": config.compress_max_tokens,
             "generation_strategy": config.generation_strategy,
         },
         **metrics,
@@ -445,7 +448,7 @@ def _build_index(config: RagConfig, csv_path: str, dataset_name: str):
         chunk_overlap=config.chunk_overlap,
     )
     docs = chunker.chunk(all_docs)
-    print(f"  Chunking ({config.chunk_strategy}): {len(all_docs)} → {len(docs)} chunks")
+    print(f"  Chunking ({config.chunk_strategy}): {len(all_docs)} -> {len(docs)} chunks")
 
     embed_model = get_embed_model(config.embed_model)
     print(f"  Building vectorstore with {config.embed_model} for {dataset_name}")
@@ -565,7 +568,10 @@ def run_unified_pipeline(config: RagConfig, dataset_csv_paths: list[str]) -> lis
     all_results = []
     for dataset_name, (qa_pairs, few_shot) in qa_groups.items():
         out_dir = _output_dir(config, dataset_name)
-        print(f"[Unified] ── {dataset_name} ({len(qa_pairs)} samples) ──")
+        print(f"[Unified] -- {dataset_name} ({len(qa_pairs)} samples) --")
+        # if dataset_name == "CSConDa":
+        #     print("  Skipping CSConDa dataset")
+        #     continue
 
         # Retrieve + Generate
         questions = [qa["question"] for qa in qa_pairs]
